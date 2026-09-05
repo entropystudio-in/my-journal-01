@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Journal Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  :root{
+    --studio: #eceae4;
+    --canvas: #ffffff;
+    --grid: rgba(23,20,16,0.06);
+    --ink: #17140f;
+    --ink-soft: #6f6a5f;
+    --muted: #a49d8d;
+    --accent: #33478f;
+    --accent-soft: #dbe1f2;
+    --warn: #b6502f;
+    --panel: #201d18;
+    --panel-text: #f4f2ec;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ height:100%; margin:0; overflow:hidden; }
+  body{
+    background: var(--studio);
+    font-family:'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: var(--ink);
+  }
+  #app{ position:fixed; inset:0; display:flex; flex-direction:column; }
+
+  /* top bar */
+  #topbar{
+    background:var(--studio); z-index:40;
+    border-bottom: 1px solid rgba(23,20,16,0.08);
+    padding: 12px 16px 10px;
+  }
+  #title-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  #title-row h1{ font-size:15px; font-weight:700; margin:0; letter-spacing:-0.01em; }
+  #title-row .sub{ font-size:11px; color:var(--ink-soft); margin-top:1px; }
+
+  #date-row{ display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .nav-btn{
+    background:var(--canvas); border:1px solid rgba(23,20,16,0.12); color:var(--ink);
+    width:32px; height:32px; border-radius:9px; font-size:15px; cursor:pointer; flex-shrink:0;
+  }
+  #date-display{
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    position:relative; cursor:pointer; padding:4px 0;
+  }
+  #date-display .day-label{ font-size:13.5px; font-weight:700; }
+  #date-display .day-sub{ font-size:10.5px; color:var(--ink-soft); }
+  #date-input{
+    position:absolute; inset:0; opacity:0; cursor:pointer; border:none;
+  }
+  #today-btn{
+    background:var(--accent-soft); color:var(--accent); border:none;
+    font-size:11.5px; font-weight:700; padding:0 11px; height:32px; border-radius:9px; cursor:pointer; flex-shrink:0;
+  }
+
+  .action-row{ display:flex; gap:8px; overflow-x:auto; padding-bottom:2px; }
+  .action-row::-webkit-scrollbar{ display:none; }
+  .pill-btn{
+    background: var(--canvas); border:1px solid rgba(23,20,16,0.12); flex-shrink:0;
+    color: var(--ink); font-size:12.5px; font-weight:600;
+    padding:7px 13px; border-radius:20px; cursor:pointer; font-family:inherit; white-space:nowrap;
+  }
+  .pill-btn:active{ background: rgba(23,20,16,0.06); }
+  .pill-btn.warn{ color: var(--warn); border-color: rgba(182,80,47,0.3); }
+  .pill-btn.primary{ background:var(--accent); color:#fff; border-color:var(--accent); }
+
+  /* board */
+  #board{ flex:1; overflow:auto; position:relative; -webkit-overflow-scrolling:touch; }
+  #canvas{
+    position:relative; width:1800px; height:2600px;
+    background:
+      radial-gradient(var(--grid) 1px, transparent 1px) 0 0 / 26px 26px,
+      var(--canvas);
+    margin: 16px; border-radius: 14px;
+    box-shadow: 0 1px 3px rgba(23,20,16,0.08);
+  }
+  #canvas.drag-over{ outline: 2px dashed var(--accent); outline-offset:-6px; }
+  #canvas.exporting .grip, #canvas.exporting .del, #canvas.exporting .resize{ display:none !important; }
+  #canvas.exporting .block.selected{ outline:none !important; }
+  #empty-state{
+    position:absolute; top:100px; left:50%; transform:translateX(-50%);
+    width: 280px; text-align:center; color: var(--muted); font-size:14px; line-height:1.6;
+    pointer-events:none;
+  }
+  #empty-state strong{ display:block; color:var(--ink-soft); font-size:16px; margin-bottom:6px; font-weight:700; }
+
+  /* blocks */
+  .block{ position:absolute; border-radius:8px; outline:1.5px solid transparent; touch-action:none; }
+  .block.selected{ outline:1.5px solid var(--accent); }
+  .block .grip{
+    position:absolute; top:-2px; left:-2px; width:26px; height:22px;
+    border-radius:7px 0 8px 0; background:rgba(23,20,16,0.10);
+    display:flex; align-items:center; justify-content:center;
+    font-size:11px; color:var(--ink-soft); cursor:grab; user-select:none;
+  }
+  .block.selected .grip{ background:var(--accent); color:#fff; }
+  .block .del{
+    position:absolute; top:-9px; right:-9px; width:22px; height:22px; border-radius:50%;
+    background:var(--warn); color:#fff; border:none; font-size:13px; line-height:1;
+    display:none; align-items:center; justify-content:center; cursor:pointer;
+    box-shadow:0 2px 6px rgba(0,0,0,0.25);
+  }
+  .block.selected .del{ display:flex; }
+  .block .resize{
+    position:absolute; bottom:-6px; right:-6px; width:18px; height:18px; border-radius:50%;
+    background:var(--accent); border:2px solid #fff; cursor:nwse-resize; display:none;
+  }
+  .block.selected .resize{ display:block; }
+
+  .text-body{
+    width:100%; height:100%; padding:18px 12px 8px; outline:none; overflow:auto;
+    line-height:1.4; word-wrap:break-word; white-space:pre-wrap;
+  }
+  .text-body:empty:before{ content: attr(data-placeholder); color: var(--muted); }
+  .image-body{ width:100%; height:100%; object-fit:cover; display:block; pointer-events:none; }
+
+  /* contextual toolbar */
+  #block-toolbar{
+    position:fixed; left:10px; right:10px; bottom:84px;
+    background: var(--panel); color: var(--panel-text);
+    border-radius:16px; padding:10px; display:none;
+    box-shadow:0 10px 28px rgba(0,0,0,0.35); z-index:60;
+    gap:8px; flex-direction:column;
+  }
+  #block-toolbar.show{ display:flex; }
+  .toolbar-row{ display:flex; gap:6px; align-items:center; overflow-x:auto; padding-bottom:2px; }
+  .toolbar-row::-webkit-scrollbar{ display:none; }
+  #font-select{
+    flex:1; min-width:120px; background:rgba(255,255,255,0.09); color:var(--panel-text);
+    border:none; border-radius:9px; padding:8px 9px; font-size:12.5px; font-family:'Inter',sans-serif;
+  }
+  .tbtn{
+    flex-shrink:0; background:rgba(255,255,255,0.09); color:var(--panel-text);
+    border:none; border-radius:9px; width:34px; height:34px; font-size:14px; font-weight:700;
+    cursor:pointer; display:flex; align-items:center; justify-content:center;
+  }
+  .tbtn.active{ background:var(--accent); }
+  .tbtn.wide{ width:auto; padding:0 12px; font-weight:600; font-size:12.5px; }
+  .size-group{ display:flex; align-items:center; gap:4px; flex-shrink:0; background:rgba(255,255,255,0.09); border-radius:9px; padding:2px; }
+  .size-group button{ background:none; border:none; color:var(--panel-text); width:28px; height:30px; font-size:15px; cursor:pointer; }
+  .size-group input{
+    width:36px; background:none; border:none; color:var(--panel-text); text-align:center; font-size:13px; font-family:inherit;
+  }
+  .swatches{ display:flex; gap:6px; flex-shrink:0; }
+  .swatch{ width:24px; height:24px; border-radius:50%; border:2px solid rgba(255,255,255,0.25); padding:0; cursor:pointer; }
+  .swatch.active{ border-color:#fff; }
+  #custom-color{ width:24px; height:24px; border:none; border-radius:50%; padding:0; background:none; cursor:pointer; }
+
+  /* FAB */
+  #fab-wrap{ position:fixed; right:16px; bottom:20px; z-index:55; }
+  #fab-options{ position:absolute; bottom:60px; right:0; display:none; flex-direction:column; gap:8px; align-items:flex-end; }
+  #fab-options.show{ display:flex; }
+  .fab-option{
+    display:flex; align-items:center; gap:8px; background:var(--panel); color:var(--panel-text);
+    border:none; border-radius:22px; padding:10px 16px; font-size:13px; font-weight:600;
+    font-family:'Inter',sans-serif; box-shadow:0 6px 18px rgba(0,0,0,0.3); cursor:pointer; white-space:nowrap;
+  }
+  #fab{
+    width:54px; height:54px; border-radius:50%; border:none; background:var(--accent); color:#fff;
+    font-size:26px; cursor:pointer; box-shadow:0 6px 18px rgba(0,0,0,0.35);
+    display:flex; align-items:center; justify-content:center; transition:transform 0.15s ease;
+  }
+  #fab.open{ transform:rotate(45deg); }
+
+  /* drawers (fonts + entries) */
+  .drawer-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,0.35); z-index:70; display:none; }
+  .drawer-backdrop.show{ display:block; }
+  .drawer{
+    position:fixed; left:0; right:0; bottom:-100%; max-height:72vh;
+    background:var(--canvas); border-radius:18px 18px 0 0; z-index:71;
+    transition: bottom 0.25s ease; display:flex; flex-direction:column;
+    box-shadow: 0 -8px 30px rgba(0,0,0,0.3);
+  }
+  .drawer.show{ bottom:0; }
+  .drawer-header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 18px 10px; border-bottom:1px solid rgba(23,20,16,0.08);
+  }
+  .drawer-header h2{ font-size:15px; margin:0; font-weight:700; }
+  .drawer-header button{ background:none; border:none; font-size:20px; color:var(--ink-soft); cursor:pointer; }
+  .drawer-body{ overflow-y:auto; padding: 8px 18px; flex:1; }
+  .font-row, .entry-row{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 0; border-bottom:1px solid rgba(23,20,16,0.06); cursor:pointer;
+  }
+  .font-row .fname, .entry-row .ename{ font-size:14px; font-weight:600; }
+  .font-row .fmeta, .entry-row .emeta{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
+  .font-row button{ background:none; border:none; color:var(--warn); font-size:12.5px; font-weight:600; cursor:pointer; }
+  .drawer-empty{ color:var(--muted); font-size:13px; padding:20px 0; text-align:center; }
+  #upload-font-btn{
+    margin:12px 18px 18px; background:var(--accent); color:#fff; border:none;
+    border-radius:12px; padding:13px; font-size:14px; font-weight:700; cursor:pointer; font-family:inherit;
+  }
+  .drawer-hint{ padding: 0 18px 14px; font-size:12px; color:var(--muted); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div id="title-row">
+      <div>
+        <h1>Journal Studio</h1>
+        <div class="sub">one page per day, any font you like</div>
+      </div>
+    </div>
+
+    <div id="date-row">
+      <button class="nav-btn" id="prev-day">‹</button>
+      <div id="date-display">
+        <div class="day-label" id="day-label">Today</div>
+        <div class="day-sub" id="day-sub"></div>
+        <input type="date" id="date-input">
+      </div>
+      <button class="nav-btn" id="next-day">›</button>
+      <button id="today-btn">Today</button>
+    </div>
+
+    <div class="action-row">
+      <button class="pill-btn primary" id="download-pdf-btn">Download PDF</button>
+      <button class="pill-btn" id="open-entries-btn">All entries</button>
+      <button class="pill-btn" id="open-fonts-btn">Fonts</button>
+      <button class="pill-btn warn" id="clear-day-btn">Clear day</button>
+    </div>
+  </div>
+
+  <div id="board">
+    <div id="canvas">
+      <div id="empty-state"><strong>nothing written yet</strong>tap + to add text or an image for this day.</div>
+    </div>
+  </div>
+
+  <div id="block-toolbar">
+    <div class="toolbar-row" id="text-controls-row1">
+      <select id="font-select"></select>
+      <button class="tbtn" id="bold-btn"><b>B</b></button>
+      <button class="tbtn" id="italic-btn"><i>I</i></button>
+      <button class="tbtn" id="underline-btn"><u>U</u></button>
+    </div>
+    <div class="toolbar-row" id="text-controls-row2">
+      <div class="size-group">
+        <button id="size-down">−</button>
+        <input id="size-input" type="number" value="18" min="8" max="140">
+        <button id="size-up">+</button>
+      </div>
+      <button class="tbtn" data-align="left">⟸</button>
+      <button class="tbtn" data-align="center">≡</button>
+      <button class="tbtn" data-align="right">⟹</button>
+      <div class="swatches" id="swatches"></div>
+      <input type="color" id="custom-color" value="#17140f">
+      <button class="tbtn wide" id="dup-btn">Duplicate</button>
+    </div>
+    <div class="toolbar-row" id="image-controls-row" style="display:none;">
+      <button class="tbtn wide" id="radius-btn">Round corners</button>
+      <button class="tbtn wide" id="dup-btn-img">Duplicate</button>
+    </div>
+  </div>
+
+  <div id="fab-wrap">
+    <div id="fab-options">
+      <button class="fab-option" data-action="text">Aa &nbsp;Add text</button>
+      <button class="fab-option" data-action="photo">🖼 &nbsp;Add image</button>
+    </div>
+    <button id="fab">+</button>
+  </div>
+  <input type="file" id="file-input-image" accept="image/*" hidden>
+  <input type="file" id="file-input-font" accept=".ttf,.otf,.woff,.woff2" hidden>
+</div>
+
+<div class="drawer-backdrop" id="fonts-backdrop"></div>
+<div class="drawer" id="fonts-drawer">
+  <div class="drawer-header"><h2>Your fonts</h2><button id="close-fonts-btn">×</button></div>
+  <div class="drawer-body" id="fonts-list"></div>
+  <div class="drawer-hint">Accepts .ttf, .otf, .woff, .woff2 — or drop a font file onto the canvas.</div>
+  <button id="upload-font-btn">Upload a font</button>
+</div>
+
+<div class="drawer-backdrop" id="entries-backdrop"></div>
+<div class="drawer" id="entries-drawer">
+  <div class="drawer-header"><h2>All entries</h2><button id="close-entries-btn">×</button></div>
+  <div class="drawer-body" id="entries-list"></div>
+</div>
+
+<script>
+const SYSTEM_FONTS = {
+  inter:  { label:'Inter',        css:"'Inter', sans-serif" },
+  sf:     { label:'SF Pro (system)', css:"-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif" },
+  serif:  { label:'Serif',        css:"Georgia, 'Times New Roman', serif" },
+  mono:   { label:'Mono',         css:"'JetBrains Mono', monospace" }
+};
+const COLORS = ['#17140f', '#33478f', '#b6502f', '#2e6b57', '#7a4a9c'];
+const VALID_FONT_EXT = ['ttf','otf','woff','woff2'];
+
+let currentDate = todayString();
+let blocks = [];
+let fontsIndex = [];
+let journalDates = []; // array of date strings ('YYYY-MM-DD') that have at least one block
+let nextZ = 1;
+let selectedId = null;
+let saveTimer = null;
+
+/* Falls back to the browser's own storage so this page works as a
+   plain standalone website (opened directly, or hosted on GitHub
+   Pages / Netlify / anywhere) even where window.storage (a Claude-app
+   API) isn't available. */
+if(!window.storage){
+  const PREFIX = 'journalstudio:';
+  window.storage = {
+    async get(key){
+      const v = localStorage.getItem(PREFIX + key);
+      return v === null ? null : { key, value: v, shared: false };
+    },
+    async set(key, value){
+      localStorage.setItem(PREFIX + key, value);
+      return { key, value, shared: false };
+    },
+    async delete(key){
+      localStorage.removeItem(PREFIX + key);
+      return { key, deleted: true, shared: false };
+    },
+    async list(prefix){
+      const keys = [];
+      for(let i = 0; i < localStorage.length; i++){
+        const k = localStorage.key(i);
+        if(k.startsWith(PREFIX + (prefix || ''))) keys.push(k.slice(PREFIX.length));
+      }
+      return { keys, prefix, shared: false };
+    }
+  };
+}
+
+const canvas = document.getElementById('canvas');
+const board = document.getElementById('board');
+const emptyState = document.getElementById('empty-state');
+const toolbar = document.getElementById('block-toolbar');
+const textRow1 = document.getElementById('text-controls-row1');
+const textRow2 = document.getElementById('text-controls-row2');
+const imageRow = document.getElementById('image-controls-row');
+const fontSelect = document.getElementById('font-select');
+const boldBtn = document.getElementById('bold-btn');
+const italicBtn = document.getElementById('italic-btn');
+const underlineBtn = document.getElementById('underline-btn');
+const sizeInput = document.getElementById('size-input');
+const swatchesEl = document.getElementById('swatches');
+const customColor = document.getElementById('custom-color');
+const dupBtn = document.getElementById('dup-btn');
+const dupBtnImg = document.getElementById('dup-btn-img');
+const radiusBtn = document.getElementById('radius-btn');
+const fab = document.getElementById('fab');
+const fabOptions = document.getElementById('fab-options');
+const fileInputImage = document.getElementById('file-input-image');
+const fileInputFont = document.getElementById('file-input-font');
+const fontsDrawer = document.getElementById('fonts-drawer');
+const fontsBackdrop = document.getElementById('fonts-backdrop');
+const fontsList = document.getElementById('fonts-list');
+const entriesDrawer = document.getElementById('entries-drawer');
+const entriesBackdrop = document.getElementById('entries-backdrop');
+const entriesList = document.getElementById('entries-list');
+const dateInput = document.getElementById('date-input');
+const dayLabel = document.getElementById('day-label');
+const daySub = document.getElementById('day-sub');
+
+function uid(){ return 'b' + Math.random().toString(36).slice(2, 10); }
+
+/* ---------- date helpers (local time, no UTC off-by-one) ---------- */
+function todayString(){ return dateToString(new Date()); }
+function dateToString(d){
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function stringToDate(s){ const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
+function shiftDate(s, delta){ const d = stringToDate(s); d.setDate(d.getDate()+delta); return dateToString(d); }
+function formatDate(s){
+  const d = stringToDate(s);
+  const isToday = s === todayString();
+  const weekday = d.toLocaleDateString(undefined, { weekday:'long' });
+  const rest = d.toLocaleDateString(undefined, { month:'long', day:'numeric', year:'numeric' });
+  return { label: isToday ? `Today` : weekday, sub: rest };
+}
+
+/* ---------- persistence ---------- */
+function scheduleSave(){ clearTimeout(saveTimer); saveTimer = setTimeout(() => saveEntry(currentDate), 500); }
+
+async function saveEntry(date){
+  try{
+    await window.storage.set('entry:' + date, JSON.stringify({ blocks, nextZ }), false);
+    const has = blocks.length > 0;
+    const included = journalDates.includes(date);
+    if(has && !included){ journalDates.push(date); journalDates.sort(); await saveDatesIndex(); }
+    else if(!has && included){ journalDates = journalDates.filter(d => d !== date); await saveDatesIndex(); }
+  }catch(e){ console.error('entry save failed', e); }
+}
+
+async function saveDatesIndex(){
+  try{ await window.storage.set('journal-dates', JSON.stringify(journalDates), false); }
+  catch(e){ console.error('dates index save failed', e); }
+}
+
+async function loadEntry(date){
+  try{
+    const res = await window.storage.get('entry:' + date, false);
+    if(res && res.value){ const data = JSON.parse(res.value); blocks = data.blocks || []; nextZ = data.nextZ || 1; }
+    else { blocks = []; nextZ = 1; }
+  }catch(e){ blocks = []; nextZ = 1; }
+}
+
+async function saveFontsIndex(){
+  try{ await window.storage.set('fonts-index', JSON.stringify(fontsIndex), false); }
+  catch(e){ console.error('fonts index save failed', e); }
+}
+
+async function init(){
+  try{
+    const res = await window.storage.get('fonts-index', false);
+    if(res && res.value) fontsIndex = JSON.parse(res.value) || [];
+  }catch(e){ fontsIndex = []; }
+
+  await Promise.all(fontsIndex.map(async f => {
+    try{
+      const data = await window.storage.get('font-data:' + f.id, false);
+      if(data && data.value) await registerFontFace(f.family, data.value);
+    }catch(e){ /* skip missing/broken font data */ }
+  }));
+
+  try{
+    const res = await window.storage.get('journal-dates', false);
+    if(res && res.value) journalDates = JSON.parse(res.value) || [];
+  }catch(e){ journalDates = []; }
+
+  await loadEntry(currentDate);
+  renderAll();
+  renderFontsList();
+  updateDateUI();
+}
+
+function registerFontFace(family, dataUrl){
+  return new Promise((resolve) => {
+    try{
+      const face = new FontFace(family, `url(${dataUrl})`);
+      face.load().then(loaded => { document.fonts.add(loaded); resolve(true); }).catch(() => resolve(false));
+    }catch(e){ resolve(false); }
+  });
+}
+
+/* ---------- date navigation ---------- */
+function updateDateUI(){
+  const { label, sub } = formatDate(currentDate);
+  dayLabel.textContent = label;
+  daySub.textContent = sub;
+  dateInput.value = currentDate;
+}
+
+async function goToDate(newDate){
+  if(newDate === currentDate) return;
+  clearTimeout(saveTimer);
+  await saveEntry(currentDate);
+  currentDate = newDate;
+  deselect();
+  await loadEntry(currentDate);
+  renderAll();
+  updateDateUI();
+}
+
+document.getElementById('prev-day').addEventListener('click', () => goToDate(shiftDate(currentDate, -1)));
+document.getElementById('next-day').addEventListener('click', () => goToDate(shiftDate(currentDate, 1)));
+document.getElementById('today-btn').addEventListener('click', () => goToDate(todayString()));
+dateInput.addEventListener('change', () => { if(dateInput.value) goToDate(dateInput.value); });
+
+/* ---------- rendering ---------- */
+function renderAll(){
+  canvas.querySelectorAll('.block').forEach(el => el.remove());
+  blocks.forEach(renderBlock);
+  emptyState.style.display = blocks.length ? 'none' : 'block';
+}
+
+function getFontCSS(b){
+  if(b.fontId){
+    const f = fontsIndex.find(x => x.id === b.fontId);
+    if(f) return `'${f.family}', sans-serif`;
+  }
+  const sys = SYSTEM_FONTS[b.systemFont] || SYSTEM_FONTS.inter;
+  return sys.css;
+}
+
+function renderBlock(b){
+  const el = document.createElement('div');
+  el.className = 'block';
+  el.dataset.id = b.id;
+  el.style.left = b.x + 'px';
+  el.style.top = b.y + 'px';
+  el.style.width = b.w + 'px';
+  el.style.height = b.h + 'px';
+  el.style.zIndex = b.z;
+
+  const grip = document.createElement('div');
+  grip.className = 'grip';
+  grip.textContent = '⠿';
+  el.appendChild(grip);
+
+  const del = document.createElement('button');
+  del.className = 'del';
+  del.textContent = '×';
+  del.addEventListener('pointerdown', e => e.stopPropagation());
+  del.addEventListener('click', () => deleteBlock(b.id));
+  el.appendChild(del);
+
+  if(b.type === 'text'){
+    const body = document.createElement('div');
+    body.className = 'text-body';
+    body.contentEditable = 'true';
+    body.dataset.placeholder = 'start typing…';
+    applyTextStyles(body, b);
+    body.innerText = b.text || '';
+    body.addEventListener('input', () => { b.text = body.innerText; scheduleSave(); });
+    body.addEventListener('pointerdown', e => { if(selectedId === b.id) e.stopPropagation(); });
+    el.appendChild(body);
+  } else {
+    const img = document.createElement('img');
+    img.className = 'image-body';
+    img.src = b.src;
+    img.style.borderRadius = b.radius ? '999px' : '8px';
+    el.appendChild(img);
+  }
+
+  const resize = document.createElement('div');
+  resize.className = 'resize';
+  el.appendChild(resize);
+
+  attachDrag(el, grip, b);
+  attachResize(el, resize, b);
+  el.addEventListener('pointerdown', () => bringToFront(b));
+  el.addEventListener('click', e => {
+    if(e.target === grip || e.target.classList.contains('resize')) return;
+    selectBlock(b.id);
+  });
+
+  if(selectedId === b.id) el.classList.add('selected');
+  canvas.appendChild(el);
+}
+
+function applyTextStyles(body, b){
+  body.style.fontFamily = getFontCSS(b);
+  body.style.fontWeight = b.bold ? '700' : '400';
+  body.style.fontStyle = b.italic ? 'italic' : 'normal';
+  body.style.textDecoration = b.underline ? 'underline' : 'none';
+  body.style.fontSize = b.size + 'px';
+  body.style.color = b.color;
+  body.style.textAlign = b.align;
+}
+
+function refreshBlockElement(b){
+  const el = canvas.querySelector('[data-id="'+b.id+'"]');
+  if(!el) return;
+  if(b.type === 'text'){
+    const body = el.querySelector('.text-body');
+    if(body) applyTextStyles(body, b);
+  } else {
+    const img = el.querySelector('.image-body');
+    if(img) img.style.borderRadius = b.radius ? '999px' : '8px';
+  }
+}
+
+function bringToFront(b){
+  b.z = ++nextZ;
+  const el = canvas.querySelector('[data-id="'+b.id+'"]');
+  if(el) el.style.zIndex = b.z;
+  scheduleSave();
+}
+
+/* ---------- selection & toolbar ---------- */
+function selectBlock(id){
+  selectedId = id;
+  canvas.querySelectorAll('.block').forEach(el => el.classList.toggle('selected', el.dataset.id === id));
+  const b = blocks.find(x => x.id === id);
+  if(!b) return;
+  toolbar.classList.add('show');
+  if(b.type === 'text'){
+    textRow1.style.display = 'flex';
+    textRow2.style.display = 'flex';
+    imageRow.style.display = 'none';
+    buildFontOptions(b);
+    boldBtn.classList.toggle('active', b.bold);
+    italicBtn.classList.toggle('active', b.italic);
+    underlineBtn.classList.toggle('active', b.underline);
+    sizeInput.value = b.size;
+    buildSwatches(b);
+    document.querySelectorAll('[data-align]').forEach(btn => btn.classList.toggle('active', btn.dataset.align === b.align));
+  } else {
+    textRow1.style.display = 'none';
+    textRow2.style.display = 'none';
+    imageRow.style.display = 'flex';
+    radiusBtn.classList.toggle('active', !!b.radius);
+  }
+}
+
+function deselect(){
+  selectedId = null;
+  canvas.querySelectorAll('.block').forEach(el => el.classList.remove('selected'));
+  toolbar.classList.remove('show');
+}
+
+function currentBlock(){ return blocks.find(x => x.id === selectedId); }
+
+function buildFontOptions(b){
+  fontSelect.innerHTML = '';
+  const sysGroup = document.createElement('optgroup');
+  sysGroup.label = 'System';
+  Object.keys(SYSTEM_FONTS).forEach(key => {
+    const opt = document.createElement('option');
+    opt.value = 'sys:' + key;
+    opt.textContent = SYSTEM_FONTS[key].label;
+    sysGroup.appendChild(opt);
+  });
+  fontSelect.appendChild(sysGroup);
+
+  if(fontsIndex.length){
+    const customGroup = document.createElement('optgroup');
+    customGroup.label = 'Your fonts';
+    fontsIndex.forEach(f => {
+      const opt = document.createElement('option');
+      opt.value = 'custom:' + f.id;
+      opt.textContent = f.label;
+      opt.style.fontFamily = `'${f.family}', sans-serif`;
+      customGroup.appendChild(opt);
+    });
+    fontSelect.appendChild(customGroup);
+  }
+  fontSelect.value = b.fontId ? ('custom:' + b.fontId) : ('sys:' + b.systemFont);
+}
+
+function buildSwatches(b){
+  swatchesEl.innerHTML = '';
+  COLORS.forEach(c => {
+    const sw = document.createElement('button');
+    sw.className = 'swatch' + (b.color === c ? ' active' : '');
+    sw.style.background = c;
+    sw.addEventListener('click', () => { b.color = c; refreshBlockElement(b); buildSwatches(b); scheduleSave(); });
+    swatchesEl.appendChild(sw);
+  });
+  customColor.value = b.color;
+}
+
+fontSelect.addEventListener('change', () => {
+  const b = currentBlock(); if(!b) return;
+  const v = fontSelect.value;
+  if(v.startsWith('custom:')){ b.fontId = v.slice(7); }
+  else { b.fontId = null; b.systemFont = v.slice(4); }
+  refreshBlockElement(b); scheduleSave();
+});
+boldBtn.addEventListener('click', () => { const b = currentBlock(); if(!b) return; b.bold = !b.bold; boldBtn.classList.toggle('active', b.bold); refreshBlockElement(b); scheduleSave(); });
+italicBtn.addEventListener('click', () => { const b = currentBlock(); if(!b) return; b.italic = !b.italic; italicBtn.classList.toggle('active', b.italic); refreshBlockElement(b); scheduleSave(); });
+underlineBtn.addEventListener('click', () => { const b = currentBlock(); if(!b) return; b.underline = !b.underline; underlineBtn.classList.toggle('active', b.underline); refreshBlockElement(b); scheduleSave(); });
+
+function setSize(v){
+  const b = currentBlock(); if(!b) return;
+  b.size = Math.max(8, Math.min(140, v));
+  sizeInput.value = b.size;
+  refreshBlockElement(b); scheduleSave();
+}
+document.getElementById('size-down').addEventListener('click', () => setSize((currentBlock()?.size || 18) - 2));
+document.getElementById('size-up').addEventListener('click', () => setSize((currentBlock()?.size || 18) + 2));
+sizeInput.addEventListener('change', () => setSize(parseInt(sizeInput.value, 10) || 18));
+
+document.querySelectorAll('[data-align]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const b = currentBlock(); if(!b) return;
+    b.align = btn.dataset.align;
+    document.querySelectorAll('[data-align]').forEach(x => x.classList.toggle('active', x === btn));
+    refreshBlockElement(b); scheduleSave();
+  });
+});
+
+customColor.addEventListener('input', () => {
+  const b = currentBlock(); if(!b) return;
+  b.color = customColor.value;
+  refreshBlockElement(b); buildSwatches(b); scheduleSave();
+});
+
+radiusBtn.addEventListener('click', () => {
+  const b = currentBlock(); if(!b) return;
+  b.radius = !b.radius;
+  radiusBtn.classList.toggle('active', b.radius);
+  refreshBlockElement(b); scheduleSave();
+});
+
+function duplicateSelected(){
+  const b = currentBlock(); if(!b) return;
+  const copy = Object.assign({}, b, { id: uid(), x: b.x + 24, y: b.y + 24, z: ++nextZ });
+  blocks.push(copy);
+  renderBlock(copy);
+  selectBlock(copy.id);
+  scheduleSave();
+}
+dupBtn.addEventListener('click', duplicateSelected);
+dupBtnImg.addEventListener('click', duplicateSelected);
+
+function deleteBlock(id){
+  blocks = blocks.filter(b => b.id !== id);
+  const el = canvas.querySelector('[data-id="'+id+'"]');
+  if(el) el.remove();
+  if(selectedId === id) deselect();
+  emptyState.style.display = blocks.length ? 'none' : 'block';
+  scheduleSave();
+}
+
+/* ---------- drag & resize ---------- */
+function attachDrag(el, handle, b){
+  let dragging = false, startX, startY, origX, origY;
+  handle.addEventListener('pointerdown', e => {
+    e.stopPropagation(); dragging = true; handle.setPointerCapture(e.pointerId);
+    startX = e.clientX; startY = e.clientY; origX = b.x; origY = b.y;
+    bringToFront(b);
+  });
+  handle.addEventListener('pointermove', e => {
+    if(!dragging) return;
+    b.x = Math.max(0, origX + (e.clientX - startX));
+    b.y = Math.max(0, origY + (e.clientY - startY));
+    el.style.left = b.x + 'px'; el.style.top = b.y + 'px';
+  });
+  const end = () => { if(dragging){ dragging = false; scheduleSave(); } };
+  handle.addEventListener('pointerup', end);
+  handle.addEventListener('pointercancel', end);
+}
+
+function attachResize(el, handle, b){
+  let resizing = false, startX, startY, origW, origH;
+  handle.addEventListener('pointerdown', e => {
+    e.stopPropagation(); resizing = true; handle.setPointerCapture(e.pointerId);
+    startX = e.clientX; startY = e.clientY; origW = b.w; origH = b.h;
+  });
+  handle.addEventListener('pointermove', e => {
+    if(!resizing) return;
+    b.w = Math.max(70, origW + (e.clientX - startX));
+    b.h = Math.max(50, origH + (e.clientY - startY));
+    el.style.width = b.w + 'px'; el.style.height = b.h + 'px';
+  });
+  const end = () => { if(resizing){ resizing = false; scheduleSave(); } };
+  handle.addEventListener('pointerup', end);
+  handle.addEventListener('pointercancel', end);
+}
+
+/* ---------- adding blocks ---------- */
+function viewportCenter(){
+  return { x: board.scrollLeft + board.clientWidth/2 - 100, y: board.scrollTop + board.clientHeight/2 - 60 };
+}
+
+function addTextBlock(x, y){
+  const pos = (x !== undefined) ? {x, y} : viewportCenter();
+  const b = { id: uid(), type:'text', x: pos.x, y: pos.y, w: 220, h: 130, text:'', fontId:null, systemFont:'inter', bold:false, italic:false, underline:false, size:18, color:'#17140f', align:'left', z: ++nextZ };
+  blocks.push(b);
+  emptyState.style.display = 'none';
+  renderBlock(b);
+  selectBlock(b.id);
+  const bodyEl = canvas.querySelector('[data-id="'+b.id+'"] .text-body');
+  if(bodyEl) bodyEl.focus();
+  scheduleSave();
+}
+
+function addImageBlock(dataUrl, ratio, x, y){
+  const pos = (x !== undefined) ? {x, y} : viewportCenter();
+  const w = 220, h = Math.min(Math.round(w / (ratio || 1)), 340);
+  const b = { id: uid(), type:'image', x: pos.x, y: pos.y, w, h, src: dataUrl, radius:false, z: ++nextZ };
+  blocks.push(b);
+  emptyState.style.display = 'none';
+  renderBlock(b);
+  selectBlock(b.id);
+  scheduleSave();
+}
+
+function handleImageFile(file, x, y){
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => addImageBlock(reader.result, img.width / img.height, x, y);
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+/* ---------- fonts ---------- */
+function slugFamily(id){ return 'cf-' + id; }
+
+async function handleFontFile(file){
+  const ext = file.name.split('.').pop().toLowerCase();
+  if(!VALID_FONT_EXT.includes(ext)){
+    alert('Please upload a .ttf, .otf, .woff, or .woff2 font file.');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const dataUrl = reader.result;
+    const id = uid();
+    const family = slugFamily(id);
+    const ok = await registerFontFace(family, dataUrl);
+    if(!ok){ alert("That file couldn't be loaded as a font."); return; }
+    const label = file.name.replace(/\.[^/.]+$/, '');
+    fontsIndex.push({ id, label, family, format: ext });
+    try{ await window.storage.set('font-data:' + id, dataUrl, false); }
+    catch(e){ console.error('font data save failed', e); }
+    saveFontsIndex();
+    renderFontsList();
+  };
+  reader.readAsDataURL(file);
+}
+
+function renderFontsList(){
+  fontsList.innerHTML = '';
+  if(!fontsIndex.length){
+    const empty = document.createElement('div');
+    empty.className = 'drawer-empty';
+    empty.textContent = "No custom fonts yet — upload one to see it here.";
+    fontsList.appendChild(empty);
+    return;
+  }
+  fontsIndex.forEach(f => {
+    const row = document.createElement('div');
+    row.className = 'font-row';
+    const left = document.createElement('div');
+    left.innerHTML = `<div class="fname" style="font-family:'${f.family}',sans-serif">${f.label}</div><div class="fmeta">.${f.format}</div>`;
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = 'Remove';
+    removeBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      fontsIndex = fontsIndex.filter(x => x.id !== f.id);
+      saveFontsIndex();
+      try{ await window.storage.delete('font-data:' + f.id, false); }catch(err){}
+      renderFontsList();
+    });
+    row.appendChild(left);
+    row.appendChild(removeBtn);
+    fontsList.appendChild(row);
+  });
+}
+
+/* ---------- entries drawer ---------- */
+function renderEntriesList(){
+  entriesList.innerHTML = '';
+  const sorted = [...journalDates].sort().reverse();
+  if(!sorted.length){
+    const empty = document.createElement('div');
+    empty.className = 'drawer-empty';
+    empty.textContent = 'No entries yet — write something and it will show up here.';
+    entriesList.appendChild(empty);
+    return;
+  }
+  sorted.forEach(dateStr => {
+    const { label, sub } = formatDate(dateStr);
+    const row = document.createElement('div');
+    row.className = 'entry-row';
+    row.innerHTML = `<div><div class="ename">${label === 'Today' ? 'Today — ' + sub : sub}</div>${dateStr === currentDate ? '<div class="emeta">currently open</div>' : ''}</div>`;
+    row.addEventListener('click', () => { closeEntriesDrawer(); goToDate(dateStr); });
+    entriesList.appendChild(row);
+  });
+}
+
+/* ---------- PDF export ---------- */
+async function exportPDF(){
+  if(!blocks.length){ alert('Nothing to export for this day yet — add some text or a photo first.'); return; }
+  deselect();
+  await new Promise(r => setTimeout(r, 60));
+
+  const pad = 28;
+  const minX = Math.max(0, Math.min(...blocks.map(b => b.x)) - pad);
+  const minY = Math.max(0, Math.min(...blocks.map(b => b.y)) - pad);
+  const maxX = Math.max(...blocks.map(b => b.x + b.w)) + pad;
+  const maxY = Math.max(...blocks.map(b => b.y + b.h)) + pad;
+  const width = Math.round(maxX - minX);
+  const height = Math.round(maxY - minY);
+
+  const downloadBtn = document.getElementById('download-pdf-btn');
+  const originalLabel = downloadBtn.textContent;
+  downloadBtn.textContent = 'Preparing…';
+  downloadBtn.disabled = true;
+  canvas.classList.add('exporting');
+
+  try{
+    const shot = await html2canvas(canvas, { x: minX, y: minY, width, height, backgroundColor: '#ffffff', scale: 2, useCORS: true });
+    const imgData = shot.toDataURL('image/jpeg', 0.92);
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: width > height ? 'landscape' : 'portrait', unit: 'px', format: [width, height] });
+    pdf.addImage(imgData, 'JPEG', 0, 0, width, height);
+    pdf.save(`journal-${currentDate}.pdf`);
+  }catch(e){
+    console.error('PDF export failed', e);
+    alert("Something went wrong creating the PDF. Please try again.");
+  }finally{
+    canvas.classList.remove('exporting');
+    downloadBtn.textContent = originalLabel;
+    downloadBtn.disabled = false;
+  }
+}
+document.getElementById('download-pdf-btn').addEventListener('click', exportPDF);
+
+/* ---------- fab & drawers ---------- */
+fab.addEventListener('click', () => { fab.classList.toggle('open'); fabOptions.classList.toggle('show'); });
+fabOptions.addEventListener('click', e => {
+  const action = e.target.closest('.fab-option')?.dataset.action;
+  if(!action) return;
+  fab.classList.remove('open'); fabOptions.classList.remove('show');
+  if(action === 'text') addTextBlock();
+  if(action === 'photo') fileInputImage.click();
+});
+fileInputImage.addEventListener('change', () => {
+  const file = fileInputImage.files[0];
+  if(file) handleImageFile(file);
+  fileInputImage.value = '';
+});
+
+function closeFontsDrawer(){ fontsDrawer.classList.remove('show'); fontsBackdrop.classList.remove('show'); }
+document.getElementById('open-fonts-btn').addEventListener('click', () => { fontsDrawer.classList.add('show'); fontsBackdrop.classList.add('show'); });
+document.getElementById('close-fonts-btn').addEventListener('click', closeFontsDrawer);
+fontsBackdrop.addEventListener('click', closeFontsDrawer);
+document.getElementById('upload-font-btn').addEventListener('click', () => fileInputFont.click());
+fileInputFont.addEventListener('change', () => {
+  const file = fileInputFont.files[0];
+  if(file) handleFontFile(file);
+  fileInputFont.value = '';
+});
+
+function closeEntriesDrawer(){ entriesDrawer.classList.remove('show'); entriesBackdrop.classList.remove('show'); }
+document.getElementById('open-entries-btn').addEventListener('click', () => { renderEntriesList(); entriesDrawer.classList.add('show'); entriesBackdrop.classList.add('show'); });
+document.getElementById('close-entries-btn').addEventListener('click', closeEntriesDrawer);
+entriesBackdrop.addEventListener('click', closeEntriesDrawer);
+
+document.getElementById('clear-day-btn').addEventListener('click', () => {
+  if(confirm(`Clear everything written on ${formatDate(currentDate).sub}? This can't be undone.`)){
+    blocks = []; deselect(); renderAll(); scheduleSave();
+  }
+});
+
+board.addEventListener('pointerdown', e => {
+  if(e.target === board || e.target === canvas || e.target === emptyState){
+    deselect(); fab.classList.remove('open'); fabOptions.classList.remove('show');
+  }
+});
+
+/* ---------- drag & drop onto canvas ---------- */
+canvas.addEventListener('dragover', e => { e.preventDefault(); canvas.classList.add('drag-over'); });
+canvas.addEventListener('dragleave', () => canvas.classList.remove('drag-over'));
+canvas.addEventListener('drop', e => {
+  e.preventDefault();
+  canvas.classList.remove('drag-over');
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const files = Array.from(e.dataTransfer.files || []);
+  files.forEach(file => {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if(file.type.startsWith('image/')) handleImageFile(file, x, y);
+    else if(VALID_FONT_EXT.includes(ext)) handleFontFile(file);
+  });
+});
+
+init();
+</script>
+</body>
+</html>
