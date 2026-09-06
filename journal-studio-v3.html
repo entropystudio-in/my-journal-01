@@ -1,0 +1,1679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Journal Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  :root{
+    --studio: #eceae4;
+    --canvas: #ffffff;
+    --grid: rgba(23,20,16,0.06);
+    --ink: #17140f;
+    --ink-soft: #6f6a5f;
+    --muted: #a49d8d;
+    --accent: #33478f;
+    --accent-soft: #dbe1f2;
+    --warn: #b6502f;
+    --panel: #201d18;
+    --panel-text: #f4f2ec;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ height:100%; margin:0; overflow:hidden; }
+  body{
+    background: var(--studio);
+    font-family:'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: var(--ink);
+  }
+  #app{ position:fixed; inset:0; display:flex; flex-direction:column; }
+
+  /* top bar */
+  #topbar{
+    background:var(--studio); z-index:40;
+    border-bottom: 1px solid rgba(23,20,16,0.08);
+    padding: 12px 16px 10px;
+  }
+  #title-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  #title-row h1{ font-size:15px; font-weight:700; margin:0; letter-spacing:-0.01em; }
+  #title-row .sub{ font-size:11px; color:var(--ink-soft); margin-top:1px; }
+
+  .tabs-row{ display:flex; gap:8px; margin-bottom:10px; }
+  .tab-btn{
+    flex:1; background:rgba(23,20,16,0.05); border:1px solid transparent; color:var(--ink-soft);
+    font-size:12.5px; font-weight:700; padding:9px; border-radius:10px; cursor:pointer; font-family:inherit;
+  }
+  .tab-btn.active{ background:var(--accent-soft); color:var(--accent); border-color:var(--accent); }
+
+  #date-row{ display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .nav-btn{
+    background:var(--canvas); border:1px solid rgba(23,20,16,0.12); color:var(--ink);
+    width:32px; height:32px; border-radius:9px; font-size:15px; cursor:pointer; flex-shrink:0;
+  }
+  #date-display{
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    position:relative; cursor:pointer; padding:4px 0;
+  }
+  #date-display .day-label{ font-size:13.5px; font-weight:700; }
+  #date-display .day-sub{ font-size:10.5px; color:var(--ink-soft); }
+  #date-input{ position:absolute; inset:0; opacity:0; cursor:pointer; border:none; }
+  #today-btn{
+    background:var(--accent-soft); color:var(--accent); border:none;
+    font-size:11.5px; font-weight:700; padding:0 11px; height:32px; border-radius:9px; cursor:pointer; flex-shrink:0;
+  }
+
+  .action-row{ display:flex; gap:8px; overflow-x:auto; padding-bottom:2px; }
+  .action-row::-webkit-scrollbar{ display:none; }
+  .pill-btn{
+    background: var(--canvas); border:1px solid rgba(23,20,16,0.12); flex-shrink:0;
+    color: var(--ink); font-size:12.5px; font-weight:600;
+    padding:7px 13px; border-radius:20px; cursor:pointer; font-family:inherit; white-space:nowrap;
+  }
+  .pill-btn:active{ background: rgba(23,20,16,0.06); }
+  .pill-btn.warn{ color: var(--warn); border-color: rgba(182,80,47,0.3); }
+  .pill-btn.primary{ background:var(--accent); color:#fff; border-color:var(--accent); }
+
+  /* ---------------- journal board ---------------- */
+  #board{ flex:1; overflow:auto; position:relative; -webkit-overflow-scrolling:touch; }
+  #canvas{
+    position:relative; width:1800px; height:2600px;
+    background:
+      radial-gradient(var(--grid) 1px, transparent 1px) 0 0 / 26px 26px,
+      var(--canvas);
+    margin: 16px; border-radius: 14px;
+    box-shadow: 0 1px 3px rgba(23,20,16,0.08);
+    transition: background 0.35s ease;
+  }
+  #canvas.drag-over{ outline: 2px dashed var(--accent); outline-offset:-6px; }
+  #canvas.exporting .grip, #canvas.exporting .del, #canvas.exporting .resize{ display:none !important; }
+  #canvas.exporting .block.selected{ outline:none !important; }
+  #empty-state{
+    position:absolute; top:100px; left:50%; transform:translateX(-50%);
+    width: 280px; text-align:center; color: var(--muted); font-size:14px; line-height:1.6;
+    pointer-events:none;
+  }
+  #empty-state strong{ display:block; color:var(--ink-soft); font-size:16px; margin-bottom:6px; font-weight:700; }
+
+  .block{ position:absolute; border-radius:8px; outline:1.5px solid transparent; touch-action:none; }
+  .block.selected{ outline:1.5px solid var(--accent); }
+  .block .grip{
+    position:absolute; top:-2px; left:-2px; width:26px; height:22px;
+    border-radius:7px 0 8px 0; background:rgba(23,20,16,0.10);
+    display:flex; align-items:center; justify-content:center;
+    font-size:11px; color:var(--ink-soft); cursor:grab; user-select:none; z-index:2;
+  }
+  .block.selected .grip{ background:var(--accent); color:#fff; }
+  .block .del{
+    position:absolute; top:-9px; right:-9px; width:22px; height:22px; border-radius:50%;
+    background:var(--warn); color:#fff; border:none; font-size:13px; line-height:1;
+    display:none; align-items:center; justify-content:center; cursor:pointer;
+    box-shadow:0 2px 6px rgba(0,0,0,0.25); z-index:2;
+  }
+  .block.selected .del{ display:flex; }
+  .block .resize{
+    position:absolute; bottom:-6px; right:-6px; width:18px; height:18px; border-radius:50%;
+    background:var(--accent); border:2px solid #fff; cursor:nwse-resize; display:none; z-index:2;
+  }
+  .block.selected .resize{ display:block; }
+
+  .text-body{
+    width:100%; height:100%; padding:18px 12px 8px; outline:none; overflow:auto;
+    line-height:1.4; word-wrap:break-word; white-space:pre-wrap;
+  }
+  .text-body:empty:before{ content: attr(data-placeholder); color: var(--muted); }
+  .media-body{ width:100%; height:100%; object-fit:cover; display:block; background:#000; }
+  img.media-body{ pointer-events:none; background:none; }
+
+  #block-toolbar{
+    position:fixed; left:10px; right:10px; bottom:84px;
+    background: var(--panel); color: var(--panel-text);
+    border-radius:16px; padding:10px; display:none;
+    box-shadow:0 10px 28px rgba(0,0,0,0.35); z-index:60;
+    gap:8px; flex-direction:column;
+  }
+  #block-toolbar.show{ display:flex; }
+  .toolbar-row{ display:flex; gap:6px; align-items:center; overflow-x:auto; padding-bottom:2px; }
+  .toolbar-row::-webkit-scrollbar{ display:none; }
+  #font-select{
+    flex:1; min-width:120px; background:rgba(255,255,255,0.09); color:var(--panel-text);
+    border:none; border-radius:9px; padding:8px 9px; font-size:12.5px; font-family:'Inter',sans-serif;
+  }
+  .tbtn{
+    flex-shrink:0; background:rgba(255,255,255,0.09); color:var(--panel-text);
+    border:none; border-radius:9px; width:34px; height:34px; font-size:14px; font-weight:700;
+    cursor:pointer; display:flex; align-items:center; justify-content:center;
+  }
+  .tbtn.active{ background:var(--accent); }
+  .tbtn.wide{ width:auto; padding:0 12px; font-weight:600; font-size:12.5px; }
+  .size-group{ display:flex; align-items:center; gap:4px; flex-shrink:0; background:rgba(255,255,255,0.09); border-radius:9px; padding:2px; }
+  .size-group button{ background:none; border:none; color:var(--panel-text); width:28px; height:30px; font-size:15px; cursor:pointer; }
+  .size-group input{ width:36px; background:none; border:none; color:var(--panel-text); text-align:center; font-size:13px; font-family:inherit; }
+  .swatches{ display:flex; gap:6px; flex-shrink:0; }
+  .swatch{ width:24px; height:24px; border-radius:50%; border:2px solid rgba(255,255,255,0.25); padding:0; cursor:pointer; }
+  .swatch.active{ border-color:#fff; }
+  #custom-color{ width:24px; height:24px; border:none; border-radius:50%; padding:0; background:none; cursor:pointer; }
+
+  /* ---------------- calendar ---------------- */
+  #calendar-view{
+    flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; position:relative; display:none;
+    background: var(--cal-bg, #ffffff); color: var(--cal-text, #17140f);
+    transition: background 0.3s ease, color 0.3s ease;
+  }
+  #cal-grid{ position:relative; height:1440px; margin: 10px 10px 60px 58px; }
+  #cal-grid.drag-over{ outline: 2px dashed var(--cal-text, #333); outline-offset:-4px; }
+  .cal-lane{
+    position:relative; height:100%;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--cal-text, #17140f) 16%, transparent) 0,
+      color-mix(in srgb, var(--cal-text, #17140f) 16%, transparent) 1px,
+      transparent 1px, transparent 60px
+    );
+  }
+  .cal-hour-label{
+    position:absolute; left:-58px; width:48px; transform:translateY(-50%);
+    font-size:10.5px; font-weight:600; text-align:right;
+    color: color-mix(in srgb, var(--cal-text, #17140f) 75%, transparent);
+  }
+  .cal-event{
+    position:absolute; left:2px; right:2px; border-radius:9px; padding:5px 8px; overflow:hidden;
+    cursor:pointer; background: var(--cal-text, #17140f); color: var(--cal-bg, #fff);
+    box-shadow:0 1px 4px rgba(0,0,0,0.18); min-height:15px;
+  }
+  .cal-event.selected{ outline:2px solid color-mix(in srgb, var(--cal-text, #17140f) 60%, white 40%); outline-offset:1px; }
+  .cal-ev-title{ font-size:12px; font-weight:700; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cal-ev-time{ font-size:10px; opacity:0.85; margin-top:1px; }
+  .cal-event .grip{
+    position:absolute; top:0; left:0; width:22px; height:16px; border-radius:9px 0 8px 0;
+    background: rgba(255,255,255,0.18); display:flex; align-items:center; justify-content:center;
+    font-size:9px; cursor:grab; z-index:2;
+  }
+  .cal-event .del{
+    position:absolute; top:-7px; right:-7px; width:19px; height:19px; border-radius:50%;
+    background:var(--warn); color:#fff; border:none; font-size:12px; line-height:1;
+    display:none; align-items:center; justify-content:center; cursor:pointer; z-index:2;
+  }
+  .cal-event.selected .del{ display:flex; }
+  .cal-event .cal-resize{
+    position:absolute; bottom:-5px; right:-5px; width:15px; height:15px; border-radius:50%;
+    background: var(--cal-text, #17140f); border:2px solid var(--cal-bg,#fff); cursor:ns-resize; display:none; z-index:2;
+  }
+  .cal-event.selected .cal-resize{ display:block; }
+  .cal-now-line{ position:absolute; left:0; right:0; height:2px; background: var(--cal-text,#c0392b); z-index:3; opacity:0.85; }
+  .cal-now-dot{ position:absolute; left:-4px; top:-4px; width:9px; height:9px; border-radius:50%; background: var(--cal-text,#c0392b); }
+
+  #cal-toolbar{
+    position:fixed; left:10px; right:10px; bottom:84px;
+    background: var(--panel); color: var(--panel-text);
+    border-radius:16px; padding:10px; display:none; flex-direction:column; gap:8px;
+    box-shadow:0 10px 28px rgba(0,0,0,0.35); z-index:60;
+  }
+  #cal-toolbar.show{ display:flex; }
+  #cal-title-input{
+    background:rgba(255,255,255,0.09); color:var(--panel-text); border:none; border-radius:9px;
+    padding:9px 10px; font-size:13.5px; font-family:inherit;
+  }
+  .cal-time-row{ display:flex; align-items:center; gap:8px; }
+  .cal-time-row input[type=time]{
+    flex:1; background:rgba(255,255,255,0.09); color:var(--panel-text); border:none; border-radius:9px;
+    padding:8px; font-size:13px; font-family:inherit;
+  }
+  .cal-time-row span{ font-size:12px; color: var(--muted); }
+  #cal-delete-btn{
+    background: var(--warn); color:#fff; border:none; border-radius:9px; padding:9px; font-size:12.5px;
+    font-weight:700; cursor:pointer; font-family:inherit;
+  }
+
+  /* theme presets */
+  .theme-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .theme-card{
+    border-radius:12px; padding:14px 10px; text-align:center; cursor:pointer;
+    border:2px solid rgba(23,20,16,0.08); font-family:inherit;
+  }
+  .theme-card.active{ border-color:var(--accent); }
+  .theme-card .theme-sample{ font-size:20px; font-weight:800; margin-bottom:6px; }
+  .theme-card .theme-name{ font-size:11.5px; font-weight:600; opacity:0.85; }
+
+  /* ---------------- notes ---------------- */
+  #notes-view{ flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; display:none; padding:14px 14px 100px; }
+  #notes-grid{ column-count:2; column-gap:12px; }
+  .note-card{
+    break-inside:avoid; margin-bottom:12px; border-radius:14px; padding:12px;
+    box-shadow:0 1px 3px rgba(23,20,16,0.10); border:1px solid rgba(23,20,16,0.07);
+  }
+  .note-text{
+    outline:none; font-size:13.5px; line-height:1.5; color:#171410; min-height:24px;
+    white-space:pre-wrap; word-wrap:break-word;
+  }
+  .note-text:empty:before{ content:"Take a note…"; color:rgba(23,20,16,0.4); }
+  .note-footer{ display:none; align-items:center; justify-content:space-between; margin-top:10px; padding-top:8px; border-top:1px solid rgba(23,20,16,0.08); }
+  .note-card:focus-within .note-footer{ display:flex; }
+  .note-colors{ display:flex; gap:5px; }
+  .note-dot{ width:17px; height:17px; border-radius:50%; border:1.5px solid rgba(23,20,16,0.15); cursor:pointer; padding:0; }
+  .note-dot.active{ border-color:#171410; }
+  .note-del{ background:none; border:none; color:var(--warn); font-size:12px; font-weight:700; cursor:pointer; }
+  #notes-empty{ color:var(--muted); font-size:13.5px; text-align:center; padding:60px 20px; line-height:1.6; }
+
+  /* FAB */
+  #fab-wrap{ position:fixed; right:16px; bottom:20px; z-index:55; }
+  #fab-options{ position:absolute; bottom:60px; right:0; display:none; flex-direction:column; gap:8px; align-items:flex-end; }
+  #fab-options.show{ display:flex; }
+  .fab-option{
+    display:flex; align-items:center; gap:8px; background:var(--panel); color:var(--panel-text);
+    border:none; border-radius:22px; padding:10px 16px; font-size:13px; font-weight:600;
+    font-family:'Inter',sans-serif; box-shadow:0 6px 18px rgba(0,0,0,0.3); cursor:pointer; white-space:nowrap;
+  }
+  #fab{
+    width:54px; height:54px; border-radius:50%; border:none; background:var(--accent); color:#fff;
+    font-size:26px; cursor:pointer; box-shadow:0 6px 18px rgba(0,0,0,0.35);
+    display:flex; align-items:center; justify-content:center; transition:transform 0.15s ease;
+  }
+  #fab.open{ transform:rotate(45deg); }
+
+  /* drawers */
+  .drawer-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,0.35); z-index:70; display:none; }
+  .drawer-backdrop.show{ display:block; }
+  .drawer{
+    position:fixed; left:0; right:0; bottom:-100%; max-height:78vh;
+    background:var(--canvas); border-radius:18px 18px 0 0; z-index:71;
+    transition: bottom 0.25s ease; display:flex; flex-direction:column;
+    box-shadow: 0 -8px 30px rgba(0,0,0,0.3);
+  }
+  .drawer.show{ bottom:0; }
+  .drawer-header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 18px 10px; border-bottom:1px solid rgba(23,20,16,0.08);
+  }
+  .drawer-header h2{ font-size:15px; margin:0; font-weight:700; }
+  .drawer-header button{ background:none; border:none; font-size:20px; color:var(--ink-soft); cursor:pointer; }
+  .drawer-body{ overflow-y:auto; padding: 8px 18px 20px; flex:1; }
+  .font-row, .entry-row{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 0; border-bottom:1px solid rgba(23,20,16,0.06); cursor:pointer;
+  }
+  .font-row .fname, .entry-row .ename{ font-size:14px; font-weight:600; }
+  .font-row .fmeta, .entry-row .emeta{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
+  .font-row button{ background:none; border:none; color:var(--warn); font-size:12.5px; font-weight:600; cursor:pointer; }
+  .drawer-empty{ color:var(--muted); font-size:13px; padding:20px 0; text-align:center; }
+  #upload-font-btn{
+    margin:12px 18px 18px; background:var(--accent); color:#fff; border:none;
+    border-radius:12px; padding:13px; font-size:14px; font-weight:700; cursor:pointer; font-family:inherit;
+  }
+  .drawer-hint{ padding: 0 18px 14px; font-size:12px; color:var(--muted); }
+
+  .bg-tabs{ display:flex; gap:8px; margin-bottom:16px; }
+  .bg-tab{
+    flex:1; background:rgba(23,20,16,0.05); border:1px solid transparent; color:var(--ink-soft);
+    font-size:13px; font-weight:600; padding:9px; border-radius:10px; cursor:pointer; font-family:inherit;
+  }
+  .bg-tab.active{ background:var(--accent-soft); color:var(--accent); border-color:var(--accent); }
+  .bg-panel{ display:none; }
+  .bg-panel.show{ display:block; }
+  .bg-field-row{ display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .bg-field-row label{ font-size:12.5px; color:var(--ink-soft); font-weight:600; width:60px; flex-shrink:0; }
+  .hex-input{
+    flex:1; border:1px solid rgba(23,20,16,0.15); border-radius:9px; padding:9px 10px;
+    font-size:13.5px; font-family:'JetBrains Mono', monospace; color:var(--ink); text-transform:uppercase;
+  }
+  .color-swatch-input{ width:34px; height:34px; border:none; border-radius:9px; padding:0; cursor:pointer; flex-shrink:0; }
+  .preset-label{ font-size:12px; color:var(--ink-soft); font-weight:600; margin: 4px 0 8px; }
+  .preset-row{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+  .preset-swatch{ width:44px; height:32px; border-radius:8px; border:2px solid rgba(23,20,16,0.1); cursor:pointer; padding:0; }
+  #angle-row{ display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+  #angle-row input[type=range]{ flex:1; }
+  #angle-value{ font-size:12.5px; color:var(--ink-soft); width:38px; text-align:right; }
+  .default-note{ font-size:13px; color:var(--ink-soft); line-height:1.5; padding: 4px 0 10px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div id="title-row">
+      <div>
+        <h1>Journal Studio</h1>
+        <div class="sub" id="app-subtitle">one page per day, any font you like</div>
+      </div>
+    </div>
+
+    <div class="tabs-row">
+      <button class="tab-btn active" data-tab="journal">Journal</button>
+      <button class="tab-btn" data-tab="calendar">Calendar</button>
+      <button class="tab-btn" data-tab="notes">Notes</button>
+    </div>
+
+    <div id="date-row">
+      <button class="nav-btn" id="prev-day">‹</button>
+      <div id="date-display">
+        <div class="day-label" id="day-label">Today</div>
+        <div class="day-sub" id="day-sub"></div>
+        <input type="date" id="date-input">
+      </div>
+      <button class="nav-btn" id="next-day">›</button>
+      <button id="today-btn">Today</button>
+    </div>
+
+    <div class="action-row" id="journal-actions">
+      <button class="pill-btn primary" id="download-pdf-btn">Download PDF</button>
+      <button class="pill-btn" id="open-bg-btn">Background</button>
+      <button class="pill-btn" id="open-entries-btn">All entries</button>
+      <button class="pill-btn" id="open-fonts-btn">Fonts</button>
+      <button class="pill-btn warn" id="clear-day-btn">Clear day</button>
+    </div>
+
+    <div class="action-row" id="calendar-actions" style="display:none;">
+      <button class="pill-btn primary" id="open-theme-btn">Theme</button>
+      <button class="pill-btn warn" id="cal-clear-btn">Clear day</button>
+    </div>
+  </div>
+
+  <div id="board">
+    <div id="canvas">
+      <div id="empty-state"><strong>nothing written yet</strong>tap + to add text, an image, or a video for this day.</div>
+    </div>
+  </div>
+
+  <div id="calendar-view">
+    <div id="cal-grid">
+      <div class="cal-lane" id="cal-lane"></div>
+    </div>
+  </div>
+
+  <div id="notes-view">
+    <div id="notes-grid"></div>
+  </div>
+
+  <div id="block-toolbar">
+    <div class="toolbar-row" id="text-controls-row1">
+      <select id="font-select"></select>
+      <button class="tbtn" id="bold-btn"><b>B</b></button>
+      <button class="tbtn" id="italic-btn"><i>I</i></button>
+      <button class="tbtn" id="underline-btn"><u>U</u></button>
+    </div>
+    <div class="toolbar-row" id="text-controls-row2">
+      <div class="size-group">
+        <button id="size-down">−</button>
+        <input id="size-input" type="number" value="18" min="8" max="140">
+        <button id="size-up">+</button>
+      </div>
+      <button class="tbtn" data-align="left">⟸</button>
+      <button class="tbtn" data-align="center">≡</button>
+      <button class="tbtn" data-align="right">⟹</button>
+      <div class="swatches" id="swatches"></div>
+      <input type="color" id="custom-color" value="#17140f">
+      <button class="tbtn wide" id="dup-btn">Duplicate</button>
+    </div>
+    <div class="toolbar-row" id="media-controls-row" style="display:none;">
+      <button class="tbtn wide" id="radius-btn">Round corners</button>
+      <button class="tbtn wide" id="dup-btn-media">Duplicate</button>
+    </div>
+  </div>
+
+  <div id="cal-toolbar">
+    <input type="text" id="cal-title-input" placeholder="Event title">
+    <div class="cal-time-row">
+      <input type="time" id="cal-start-input">
+      <span>to</span>
+      <input type="time" id="cal-end-input">
+    </div>
+    <button id="cal-delete-btn">Delete event</button>
+  </div>
+
+  <div id="fab-wrap">
+    <div id="fab-options">
+      <button class="fab-option" data-action="text">Aa &nbsp;Add text</button>
+      <button class="fab-option" data-action="photo">🖼 &nbsp;Add image</button>
+      <button class="fab-option" data-action="video">🎬 &nbsp;Add video</button>
+    </div>
+    <button id="fab">+</button>
+  </div>
+  <input type="file" id="file-input-image" accept="image/*" hidden>
+  <input type="file" id="file-input-video" accept="video/*" hidden>
+  <input type="file" id="file-input-font" accept=".ttf,.otf,.woff,.woff2" hidden>
+</div>
+
+<div class="drawer-backdrop" id="fonts-backdrop"></div>
+<div class="drawer" id="fonts-drawer">
+  <div class="drawer-header"><h2>Your fonts</h2><button id="close-fonts-btn">×</button></div>
+  <div class="drawer-body" id="fonts-list"></div>
+  <div class="drawer-hint">Accepts .ttf, .otf, .woff, .woff2 — or drop a font file onto the canvas.</div>
+  <button id="upload-font-btn">Upload a font</button>
+</div>
+
+<div class="drawer-backdrop" id="entries-backdrop"></div>
+<div class="drawer" id="entries-drawer">
+  <div class="drawer-header"><h2>All entries</h2><button id="close-entries-btn">×</button></div>
+  <div class="drawer-body" id="entries-list"></div>
+</div>
+
+<div class="drawer-backdrop" id="bg-backdrop"></div>
+<div class="drawer" id="bg-drawer">
+  <div class="drawer-header"><h2>Page background</h2><button id="close-bg-btn">×</button></div>
+  <div class="drawer-body">
+    <div class="bg-tabs">
+      <button class="bg-tab" data-mode="default">Default</button>
+      <button class="bg-tab" data-mode="solid">Solid color</button>
+      <button class="bg-tab" data-mode="gradient">Gradient</button>
+    </div>
+    <div class="bg-panel" id="bg-panel-default">
+      <div class="default-note">The plain paper background — a soft dotted grid, no color applied.</div>
+    </div>
+    <div class="bg-panel" id="bg-panel-solid">
+      <div class="bg-field-row">
+        <label>Hex code</label>
+        <input class="hex-input" id="solid-hex" placeholder="#F4ECD8">
+        <input type="color" class="color-swatch-input" id="solid-picker">
+      </div>
+      <div class="preset-label">Quick picks</div>
+      <div class="preset-row" id="solid-presets"></div>
+    </div>
+    <div class="bg-panel" id="bg-panel-gradient">
+      <div class="bg-field-row">
+        <label>Color 1</label>
+        <input class="hex-input" id="grad-hex1" placeholder="#FDF0E6">
+        <input type="color" class="color-swatch-input" id="grad-picker1">
+      </div>
+      <div class="bg-field-row">
+        <label>Color 2</label>
+        <input class="hex-input" id="grad-hex2" placeholder="#E9F0FB">
+        <input type="color" class="color-swatch-input" id="grad-picker2">
+      </div>
+      <div id="angle-row">
+        <label style="font-size:12.5px;color:var(--ink-soft);font-weight:600;">Angle</label>
+        <input type="range" id="grad-angle" min="0" max="360" step="15" value="135">
+        <span id="angle-value">135°</span>
+      </div>
+      <div class="preset-label">Smooth presets</div>
+      <div class="preset-row" id="gradient-presets"></div>
+    </div>
+  </div>
+</div>
+
+<div class="drawer-backdrop" id="theme-backdrop"></div>
+<div class="drawer" id="theme-drawer">
+  <div class="drawer-header"><h2>Calendar theme</h2><button id="close-theme-btn">×</button></div>
+  <div class="drawer-body">
+    <div class="theme-grid" id="theme-grid"></div>
+  </div>
+</div>
+
+<script>
+const SYSTEM_FONTS = {
+  inter:  { label:'Inter',        css:"'Inter', sans-serif" },
+  sf:     { label:'SF Pro (system)', css:"-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif" },
+  serif:  { label:'Serif',        css:"Georgia, 'Times New Roman', serif" },
+  mono:   { label:'Mono',         css:"'JetBrains Mono', monospace" }
+};
+const COLORS = ['#17140f', '#33478f', '#b6502f', '#2e6b57', '#7a4a9c'];
+const VALID_FONT_EXT = ['ttf','otf','woff','woff2'];
+const SOLID_PRESETS = ['#f4ecd8','#eef2f5','#fdf1e8','#eef7f0','#f2eef7','#171b20'];
+const GRADIENT_PRESETS = [
+  ['#fdf0e6','#e9f0fb'], ['#eef6f0','#eef0fb'], ['#fff6e9','#fdebf0'],
+  ['#eaf3fb','#eef8f2'], ['#f3eef7','#eef4f7'], ['#161c24','#232b36']
+];
+const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+const CANVAS_MIN_HEIGHT = 2600;
+const GROW_CHUNK = 1600;
+const LARGE_VIDEO_WARN_BYTES = 15 * 1024 * 1024;
+const NOTE_COLORS = ['#ffffff','#fdf3c7','#fbdada','#d9f0df','#d8e6fb','#ecdcf7'];
+const CAL_THEMES = [
+  { id:'white-yellow', label:'White & Yellow', bg:'#ffffff', text:'#f0b90b' },
+  { id:'black-yellow', label:'Black & Yellow', bg:'#121212', text:'#f2c94c' },
+  { id:'red-yellow',   label:'Red & Yellow',   bg:'#c0392b', text:'#f5d76e' },
+  { id:'white-black',  label:'White & Black',  bg:'#ffffff', text:'#17140f' },
+  { id:'white-grey',   label:'White & Grey',   bg:'#ffffff', text:'#8a8a8a' },
+  { id:'black-white',  label:'Black & White',  bg:'#121212', text:'#ffffff' }
+];
+
+let activeTab = 'journal';
+let currentDate = todayString();
+let blocks = [];
+let fontsIndex = [];
+let journalDates = [];
+let nextZ = 1;
+let selectedId = null;
+let saveTimer = null;
+let background = { mode:'default', solidColor:'#f4ecd8', color1:'#fdf0e6', color2:'#e9f0fb', angle:135 };
+
+let calEvents = [];
+let calThemeId = 'white-black';
+let selectedEventId = null;
+let calSaveTimer = null;
+let calScrolledOnce = false;
+let nowLineInterval = null;
+
+let notes = [];
+let notesSaveTimer = null;
+
+/* Falls back to the browser's own storage so this page works as a
+   plain standalone website (opened directly, or hosted on GitHub
+   Pages / Netlify / anywhere) even where window.storage (a Claude-app
+   API) isn't available. */
+if(!window.storage){
+  const PREFIX = 'journalstudio:';
+  window.storage = {
+    async get(key){
+      const v = localStorage.getItem(PREFIX + key);
+      return v === null ? null : { key, value: v, shared: false };
+    },
+    async set(key, value){
+      localStorage.setItem(PREFIX + key, value);
+      return { key, value, shared: false };
+    },
+    async delete(key){
+      localStorage.removeItem(PREFIX + key);
+      return { key, deleted: true, shared: false };
+    },
+    async list(prefix){
+      const keys = [];
+      for(let i = 0; i < localStorage.length; i++){
+        const k = localStorage.key(i);
+        if(k.startsWith(PREFIX + (prefix || ''))) keys.push(k.slice(PREFIX.length));
+      }
+      return { keys, prefix, shared: false };
+    }
+  };
+}
+
+const canvas = document.getElementById('canvas');
+const board = document.getElementById('board');
+const calendarView = document.getElementById('calendar-view');
+const calGrid = document.getElementById('cal-grid');
+const calLane = document.getElementById('cal-lane');
+const notesView = document.getElementById('notes-view');
+const notesGrid = document.getElementById('notes-grid');
+const emptyState = document.getElementById('empty-state');
+const toolbar = document.getElementById('block-toolbar');
+const calToolbar = document.getElementById('cal-toolbar');
+const textRow1 = document.getElementById('text-controls-row1');
+const textRow2 = document.getElementById('text-controls-row2');
+const mediaRow = document.getElementById('media-controls-row');
+const fontSelect = document.getElementById('font-select');
+const boldBtn = document.getElementById('bold-btn');
+const italicBtn = document.getElementById('italic-btn');
+const underlineBtn = document.getElementById('underline-btn');
+const sizeInput = document.getElementById('size-input');
+const swatchesEl = document.getElementById('swatches');
+const customColor = document.getElementById('custom-color');
+const dupBtn = document.getElementById('dup-btn');
+const dupBtnMedia = document.getElementById('dup-btn-media');
+const radiusBtn = document.getElementById('radius-btn');
+const fab = document.getElementById('fab');
+const fabWrap = document.getElementById('fab-wrap');
+const fabOptions = document.getElementById('fab-options');
+const fileInputImage = document.getElementById('file-input-image');
+const fileInputVideo = document.getElementById('file-input-video');
+const fileInputFont = document.getElementById('file-input-font');
+const fontsDrawer = document.getElementById('fonts-drawer');
+const fontsBackdrop = document.getElementById('fonts-backdrop');
+const fontsList = document.getElementById('fonts-list');
+const entriesDrawer = document.getElementById('entries-drawer');
+const entriesBackdrop = document.getElementById('entries-backdrop');
+const entriesList = document.getElementById('entries-list');
+const bgDrawer = document.getElementById('bg-drawer');
+const bgBackdrop = document.getElementById('bg-backdrop');
+const themeDrawer = document.getElementById('theme-drawer');
+const themeBackdrop = document.getElementById('theme-backdrop');
+const dateInput = document.getElementById('date-input');
+const dayLabel = document.getElementById('day-label');
+const daySub = document.getElementById('day-sub');
+const journalActions = document.getElementById('journal-actions');
+const calendarActions = document.getElementById('calendar-actions');
+const dateRow = document.getElementById('date-row');
+const appSubtitle = document.getElementById('app-subtitle');
+const calTitleInput = document.getElementById('cal-title-input');
+const calStartInput = document.getElementById('cal-start-input');
+const calEndInput = document.getElementById('cal-end-input');
+
+function uid(){ return 'b' + Math.random().toString(36).slice(2, 10); }
+
+/* ---------- date helpers ---------- */
+function todayString(){ return dateToString(new Date()); }
+function dateToString(d){
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function stringToDate(s){ const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
+function shiftDate(s, delta){ const d = stringToDate(s); d.setDate(d.getDate()+delta); return dateToString(d); }
+function formatDate(s){
+  const d = stringToDate(s);
+  const isToday = s === todayString();
+  const weekday = d.toLocaleDateString(undefined, { weekday:'long' });
+  const rest = d.toLocaleDateString(undefined, { month:'long', day:'numeric', year:'numeric' });
+  return { label: isToday ? `Today` : weekday, sub: rest };
+}
+
+/* ---------- tabs ---------- */
+const SUBTITLES = { journal:'one page per day, any font you like', calendar:'plan your day, hour by hour', notes:'quick notes, anytime' };
+function setTab(tab){
+  activeTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  appSubtitle.textContent = SUBTITLES[tab];
+  board.style.display = tab === 'journal' ? '' : 'none';
+  calendarView.style.display = tab === 'calendar' ? 'block' : 'none';
+  notesView.style.display = tab === 'notes' ? 'block' : 'none';
+  dateRow.style.display = tab === 'notes' ? 'none' : 'flex';
+  journalActions.style.display = tab === 'journal' ? 'flex' : 'none';
+  calendarActions.style.display = tab === 'calendar' ? 'flex' : 'none';
+  fabWrap.style.display = tab === 'calendar' ? 'none' : 'block';
+  fabOptions.classList.remove('show');
+  fab.classList.remove('open');
+  toolbar.classList.remove('show');
+  calToolbar.classList.remove('show');
+  deselectEvent();
+
+  if(tab === 'calendar'){
+    renderCalendar();
+    if(!calScrolledOnce){ calendarView.scrollTop = 6 * 60; calScrolledOnce = true; }
+    startNowLine();
+  } else {
+    stopNowLine();
+  }
+  if(tab === 'notes') renderNotes();
+}
+document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => setTab(btn.dataset.tab)));
+
+/* ---------- persistence ---------- */
+function scheduleSave(){ clearTimeout(saveTimer); saveTimer = setTimeout(() => saveEntry(currentDate), 500); }
+
+async function saveEntry(date){
+  try{
+    await window.storage.set('entry:' + date, JSON.stringify({ blocks, nextZ, background }), false);
+    const has = blocks.length > 0;
+    const included = journalDates.includes(date);
+    if(has && !included){ journalDates.push(date); journalDates.sort(); await saveDatesIndex(); }
+    else if(!has && included){ journalDates = journalDates.filter(d => d !== date); await saveDatesIndex(); }
+  }catch(e){
+    console.error('entry save failed', e);
+    alert("Couldn't save this entry — it may be too large for browser storage (large videos are usually the cause). Try a shorter clip.");
+  }
+}
+async function saveDatesIndex(){
+  try{ await window.storage.set('journal-dates', JSON.stringify(journalDates), false); }
+  catch(e){ console.error('dates index save failed', e); }
+}
+async function loadEntry(date){
+  const fallback = { mode:'default', solidColor:'#f4ecd8', color1:'#fdf0e6', color2:'#e9f0fb', angle:135 };
+  try{
+    const res = await window.storage.get('entry:' + date, false);
+    if(res && res.value){
+      const data = JSON.parse(res.value);
+      blocks = data.blocks || []; nextZ = data.nextZ || 1; background = data.background || fallback;
+    } else { blocks = []; nextZ = 1; background = fallback; }
+  }catch(e){ blocks = []; nextZ = 1; background = fallback; }
+}
+async function saveFontsIndex(){
+  try{ await window.storage.set('fonts-index', JSON.stringify(fontsIndex), false); }
+  catch(e){ console.error('fonts index save failed', e); }
+}
+
+async function loadCalEvents(date){
+  try{
+    const res = await window.storage.get('cal-events:' + date, false);
+    calEvents = (res && res.value) ? JSON.parse(res.value) : [];
+  }catch(e){ calEvents = []; }
+}
+function scheduleCalSave(){ clearTimeout(calSaveTimer); calSaveTimer = setTimeout(() => saveCalEvents(currentDate), 400); }
+async function saveCalEvents(date){
+  try{ await window.storage.set('cal-events:' + date, JSON.stringify(calEvents), false); }
+  catch(e){ console.error('calendar save failed', e); alert("Couldn't save your schedule for this day."); }
+}
+async function loadCalTheme(){
+  try{
+    const res = await window.storage.get('cal-theme', false);
+    calThemeId = (res && res.value) ? res.value : 'white-black';
+  }catch(e){ calThemeId = 'white-black'; }
+}
+async function saveCalTheme(){ try{ await window.storage.set('cal-theme', calThemeId, false); }catch(e){} }
+
+async function loadNotes(){
+  try{
+    const res = await window.storage.get('keep-notes', false);
+    notes = (res && res.value) ? JSON.parse(res.value) : [];
+  }catch(e){ notes = []; }
+}
+function scheduleNotesSave(){ clearTimeout(notesSaveTimer); notesSaveTimer = setTimeout(saveNotes, 400); }
+async function saveNotes(){
+  try{ await window.storage.set('keep-notes', JSON.stringify(notes), false); }
+  catch(e){ console.error('notes save failed', e); alert("Couldn't save your notes — they may be too large for browser storage."); }
+}
+
+async function init(){
+  try{
+    const res = await window.storage.get('fonts-index', false);
+    if(res && res.value) fontsIndex = JSON.parse(res.value) || [];
+  }catch(e){ fontsIndex = []; }
+
+  await Promise.all(fontsIndex.map(async f => {
+    try{
+      const data = await window.storage.get('font-data:' + f.id, false);
+      if(data && data.value) await registerFontFace(f.family, data.value);
+    }catch(e){ /* skip missing/broken font data */ }
+  }));
+
+  try{
+    const res = await window.storage.get('journal-dates', false);
+    if(res && res.value) journalDates = JSON.parse(res.value) || [];
+  }catch(e){ journalDates = []; }
+
+  await loadEntry(currentDate);
+  await loadCalEvents(currentDate);
+  await loadCalTheme();
+  await loadNotes();
+
+  renderAll();
+  renderFontsList();
+  updateDateUI();
+  applyBackground();
+  applyCalTheme();
+  buildThemeGrid();
+
+  setTab('journal');
+}
+
+function registerFontFace(family, dataUrl){
+  return new Promise((resolve) => {
+    try{
+      const face = new FontFace(family, `url(${dataUrl})`);
+      face.load().then(loaded => { document.fonts.add(loaded); resolve(true); }).catch(() => resolve(false));
+    }catch(e){ resolve(false); }
+  });
+}
+
+/* ---------- date navigation ---------- */
+function updateDateUI(){
+  const { label, sub } = formatDate(currentDate);
+  dayLabel.textContent = label;
+  daySub.textContent = sub;
+  dateInput.value = currentDate;
+}
+
+async function goToDate(newDate){
+  if(newDate === currentDate) return;
+  clearTimeout(saveTimer);
+  await saveEntry(currentDate);
+  currentDate = newDate;
+  deselect();
+  deselectEvent();
+  await loadEntry(currentDate);
+  await loadCalEvents(currentDate);
+  renderAll();
+  updateDateUI();
+  applyBackground();
+  if(activeTab === 'calendar') renderCalendar();
+}
+
+document.getElementById('prev-day').addEventListener('click', () => goToDate(shiftDate(currentDate, -1)));
+document.getElementById('next-day').addEventListener('click', () => goToDate(shiftDate(currentDate, 1)));
+document.getElementById('today-btn').addEventListener('click', () => goToDate(todayString()));
+dateInput.addEventListener('change', () => { if(dateInput.value) goToDate(dateInput.value); });
+
+/* ---------- infinite vertical scroll (journal) ---------- */
+function ensureCanvasHeight(minHeight){
+  const current = canvas.offsetHeight;
+  if(minHeight > current) canvas.style.height = minHeight + 'px';
+}
+function growIfNear(bottomEdge){
+  if(bottomEdge > canvas.offsetHeight - 500) ensureCanvasHeight(canvas.offsetHeight + GROW_CHUNK);
+}
+board.addEventListener('scroll', () => {
+  if(board.scrollTop + board.clientHeight > canvas.offsetHeight - 500){
+    ensureCanvasHeight(canvas.offsetHeight + GROW_CHUNK);
+  }
+});
+
+/* ---------- journal rendering ---------- */
+function renderAll(){
+  canvas.querySelectorAll('.block').forEach(el => el.remove());
+  const maxBottom = blocks.length ? Math.max(...blocks.map(b => b.y + b.h)) : 0;
+  canvas.style.height = Math.max(CANVAS_MIN_HEIGHT, maxBottom + 900) + 'px';
+  blocks.forEach(renderBlock);
+  emptyState.style.display = blocks.length ? 'none' : 'block';
+}
+
+function getFontCSS(b){
+  if(b.fontId){
+    const f = fontsIndex.find(x => x.id === b.fontId);
+    if(f) return `'${f.family}', sans-serif`;
+  }
+  const sys = SYSTEM_FONTS[b.systemFont] || SYSTEM_FONTS.inter;
+  return sys.css;
+}
+
+function renderBlock(b){
+  const el = document.createElement('div');
+  el.className = 'block';
+  el.dataset.id = b.id;
+  el.style.left = b.x + 'px'; el.style.top = b.y + 'px';
+  el.style.width = b.w + 'px'; el.style.height = b.h + 'px';
+  el.style.zIndex = b.z;
+
+  const grip = document.createElement('div');
+  grip.className = 'grip'; grip.textContent = '⠿';
+  el.appendChild(grip);
+
+  const del = document.createElement('button');
+  del.className = 'del'; del.textContent = '×';
+  del.addEventListener('pointerdown', e => e.stopPropagation());
+  del.addEventListener('click', () => deleteBlock(b.id));
+  el.appendChild(del);
+
+  if(b.type === 'text'){
+    const body = document.createElement('div');
+    body.className = 'text-body';
+    body.contentEditable = 'true';
+    body.dataset.placeholder = 'start typing…';
+    applyTextStyles(body, b);
+    body.innerText = b.text || '';
+    body.addEventListener('input', () => { b.text = body.innerText; scheduleSave(); });
+    body.addEventListener('pointerdown', e => { if(selectedId === b.id) e.stopPropagation(); });
+    el.appendChild(body);
+  } else if(b.type === 'video'){
+    const vid = document.createElement('video');
+    vid.className = 'media-body'; vid.src = b.src; vid.controls = true; vid.playsInline = true;
+    vid.style.borderRadius = b.radius ? '999px' : '8px';
+    el.appendChild(vid);
+  } else {
+    const img = document.createElement('img');
+    img.className = 'media-body'; img.src = b.src;
+    img.style.borderRadius = b.radius ? '999px' : '8px';
+    el.appendChild(img);
+  }
+
+  const resize = document.createElement('div');
+  resize.className = 'resize';
+  el.appendChild(resize);
+
+  attachDrag(el, grip, b);
+  attachResize(el, resize, b);
+  el.addEventListener('pointerdown', () => bringToFront(b));
+  el.addEventListener('click', e => {
+    if(e.target === grip || e.target.classList.contains('resize')) return;
+    selectBlock(b.id);
+  });
+
+  if(selectedId === b.id) el.classList.add('selected');
+  canvas.appendChild(el);
+}
+
+function applyTextStyles(body, b){
+  body.style.fontFamily = getFontCSS(b);
+  body.style.fontWeight = b.bold ? '700' : '400';
+  body.style.fontStyle = b.italic ? 'italic' : 'normal';
+  body.style.textDecoration = b.underline ? 'underline' : 'none';
+  body.style.fontSize = b.size + 'px';
+  body.style.color = b.color;
+  body.style.textAlign = b.align;
+}
+
+function refreshBlockElement(b){
+  const el = canvas.querySelector('[data-id="'+b.id+'"]');
+  if(!el) return;
+  if(b.type === 'text'){
+    const body = el.querySelector('.text-body');
+    if(body) applyTextStyles(body, b);
+  } else {
+    const media = el.querySelector('.media-body');
+    if(media) media.style.borderRadius = b.radius ? '999px' : '8px';
+  }
+}
+
+function bringToFront(b){
+  b.z = ++nextZ;
+  const el = canvas.querySelector('[data-id="'+b.id+'"]');
+  if(el) el.style.zIndex = b.z;
+  scheduleSave();
+}
+
+function selectBlock(id){
+  selectedId = id;
+  canvas.querySelectorAll('.block').forEach(el => el.classList.toggle('selected', el.dataset.id === id));
+  const b = blocks.find(x => x.id === id);
+  if(!b) return;
+  toolbar.classList.add('show');
+  if(b.type === 'text'){
+    textRow1.style.display = 'flex'; textRow2.style.display = 'flex'; mediaRow.style.display = 'none';
+    buildFontOptions(b);
+    boldBtn.classList.toggle('active', b.bold);
+    italicBtn.classList.toggle('active', b.italic);
+    underlineBtn.classList.toggle('active', b.underline);
+    sizeInput.value = b.size;
+    buildSwatches(b);
+    document.querySelectorAll('[data-align]').forEach(btn => btn.classList.toggle('active', btn.dataset.align === b.align));
+  } else {
+    textRow1.style.display = 'none'; textRow2.style.display = 'none'; mediaRow.style.display = 'flex';
+    radiusBtn.classList.toggle('active', !!b.radius);
+  }
+}
+function deselect(){
+  selectedId = null;
+  canvas.querySelectorAll('.block').forEach(el => el.classList.remove('selected'));
+  toolbar.classList.remove('show');
+}
+function currentBlock(){ return blocks.find(x => x.id === selectedId); }
+
+function buildFontOptions(b){
+  fontSelect.innerHTML = '';
+  const sysGroup = document.createElement('optgroup');
+  sysGroup.label = 'System';
+  Object.keys(SYSTEM_FONTS).forEach(key => {
+    const opt = document.createElement('option');
+    opt.value = 'sys:' + key; opt.textContent = SYSTEM_FONTS[key].label;
+    sysGroup.appendChild(opt);
+  });
+  fontSelect.appendChild(sysGroup);
+  if(fontsIndex.length){
+    const customGroup = document.createElement('optgroup');
+    customGroup.label = 'Your fonts';
+    fontsIndex.forEach(f => {
+      const opt = document.createElement('option');
+      opt.value = 'custom:' + f.id; opt.textContent = f.label;
+      opt.style.fontFamily = `'${f.family}', sans-serif`;
+      customGroup.appendChild(opt);
+    });
+    fontSelect.appendChild(customGroup);
+  }
+  fontSelect.value = b.fontId ? ('custom:' + b.fontId) : ('sys:' + b.systemFont);
+}
+
+function buildSwatches(b){
+  swatchesEl.innerHTML = '';
+  COLORS.forEach(c => {
+    const sw = document.createElement('button');
+    sw.className = 'swatch' + (b.color === c ? ' active' : '');
+    sw.style.background = c;
+    sw.addEventListener('click', () => { b.color = c; refreshBlockElement(b); buildSwatches(b); scheduleSave(); });
+    swatchesEl.appendChild(sw);
+  });
+  customColor.value = b.color;
+}
+
+fontSelect.addEventListener('change', () => {
+  const b = currentBlock(); if(!b) return;
+  const v = fontSelect.value;
+  if(v.startsWith('custom:')){ b.fontId = v.slice(7); } else { b.fontId = null; b.systemFont = v.slice(4); }
+  refreshBlockElement(b); scheduleSave();
+});
+boldBtn.addEventListener('click', () => { const b = currentBlock(); if(!b) return; b.bold = !b.bold; boldBtn.classList.toggle('active', b.bold); refreshBlockElement(b); scheduleSave(); });
+italicBtn.addEventListener('click', () => { const b = currentBlock(); if(!b) return; b.italic = !b.italic; italicBtn.classList.toggle('active', b.italic); refreshBlockElement(b); scheduleSave(); });
+underlineBtn.addEventListener('click', () => { const b = currentBlock(); if(!b) return; b.underline = !b.underline; underlineBtn.classList.toggle('active', b.underline); refreshBlockElement(b); scheduleSave(); });
+
+function setSize(v){
+  const b = currentBlock(); if(!b) return;
+  b.size = Math.max(8, Math.min(140, v)); sizeInput.value = b.size;
+  refreshBlockElement(b); scheduleSave();
+}
+document.getElementById('size-down').addEventListener('click', () => setSize((currentBlock()?.size || 18) - 2));
+document.getElementById('size-up').addEventListener('click', () => setSize((currentBlock()?.size || 18) + 2));
+sizeInput.addEventListener('change', () => setSize(parseInt(sizeInput.value, 10) || 18));
+
+document.querySelectorAll('[data-align]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const b = currentBlock(); if(!b) return;
+    b.align = btn.dataset.align;
+    document.querySelectorAll('[data-align]').forEach(x => x.classList.toggle('active', x === btn));
+    refreshBlockElement(b); scheduleSave();
+  });
+});
+customColor.addEventListener('input', () => {
+  const b = currentBlock(); if(!b) return;
+  b.color = customColor.value; refreshBlockElement(b); buildSwatches(b); scheduleSave();
+});
+radiusBtn.addEventListener('click', () => {
+  const b = currentBlock(); if(!b) return;
+  b.radius = !b.radius; radiusBtn.classList.toggle('active', b.radius);
+  refreshBlockElement(b); scheduleSave();
+});
+function duplicateSelected(){
+  const b = currentBlock(); if(!b) return;
+  const copy = Object.assign({}, b, { id: uid(), x: b.x + 24, y: b.y + 24, z: ++nextZ });
+  blocks.push(copy); growIfNear(copy.y + copy.h);
+  renderBlock(copy); selectBlock(copy.id); scheduleSave();
+}
+dupBtn.addEventListener('click', duplicateSelected);
+dupBtnMedia.addEventListener('click', duplicateSelected);
+
+function deleteBlock(id){
+  blocks = blocks.filter(b => b.id !== id);
+  const el = canvas.querySelector('[data-id="'+id+'"]');
+  if(el) el.remove();
+  if(selectedId === id) deselect();
+  emptyState.style.display = blocks.length ? 'none' : 'block';
+  scheduleSave();
+}
+
+function attachDrag(el, handle, b){
+  let dragging = false, startX, startY, origX, origY;
+  handle.addEventListener('pointerdown', e => {
+    e.stopPropagation(); dragging = true; handle.setPointerCapture(e.pointerId);
+    startX = e.clientX; startY = e.clientY; origX = b.x; origY = b.y;
+    bringToFront(b);
+  });
+  handle.addEventListener('pointermove', e => {
+    if(!dragging) return;
+    b.x = Math.max(0, origX + (e.clientX - startX));
+    b.y = Math.max(0, origY + (e.clientY - startY));
+    el.style.left = b.x + 'px'; el.style.top = b.y + 'px';
+    growIfNear(b.y + b.h);
+  });
+  const end = () => { if(dragging){ dragging = false; scheduleSave(); } };
+  handle.addEventListener('pointerup', end);
+  handle.addEventListener('pointercancel', end);
+}
+function attachResize(el, handle, b){
+  let resizing = false, startX, startY, origW, origH;
+  handle.addEventListener('pointerdown', e => {
+    e.stopPropagation(); resizing = true; handle.setPointerCapture(e.pointerId);
+    startX = e.clientX; startY = e.clientY; origW = b.w; origH = b.h;
+  });
+  handle.addEventListener('pointermove', e => {
+    if(!resizing) return;
+    b.w = Math.max(70, origW + (e.clientX - startX));
+    b.h = Math.max(50, origH + (e.clientY - startY));
+    el.style.width = b.w + 'px'; el.style.height = b.h + 'px';
+    growIfNear(b.y + b.h);
+  });
+  const end = () => { if(resizing){ resizing = false; scheduleSave(); } };
+  handle.addEventListener('pointerup', end);
+  handle.addEventListener('pointercancel', end);
+}
+
+function viewportCenter(){
+  return { x: board.scrollLeft + board.clientWidth/2 - 100, y: board.scrollTop + board.clientHeight/2 - 60 };
+}
+function addTextBlock(x, y){
+  const pos = (x !== undefined) ? {x, y} : viewportCenter();
+  const b = { id: uid(), type:'text', x: pos.x, y: pos.y, w: 220, h: 130, text:'', fontId:null, systemFont:'inter', bold:false, italic:false, underline:false, size:18, color:'#17140f', align:'left', z: ++nextZ };
+  blocks.push(b); growIfNear(b.y + b.h);
+  emptyState.style.display = 'none';
+  renderBlock(b); selectBlock(b.id);
+  const bodyEl = canvas.querySelector('[data-id="'+b.id+'"] .text-body');
+  if(bodyEl) bodyEl.focus();
+  scheduleSave();
+}
+function addImageBlock(dataUrl, ratio, x, y){
+  const pos = (x !== undefined) ? {x, y} : viewportCenter();
+  const w = 220, h = Math.min(Math.round(w / (ratio || 1)), 340);
+  const b = { id: uid(), type:'image', x: pos.x, y: pos.y, w, h, src: dataUrl, radius:false, z: ++nextZ };
+  blocks.push(b); growIfNear(b.y + b.h);
+  emptyState.style.display = 'none';
+  renderBlock(b); selectBlock(b.id); scheduleSave();
+}
+function addVideoBlock(dataUrl, ratio, x, y){
+  const pos = (x !== undefined) ? {x, y} : viewportCenter();
+  const w = 280, h = Math.min(Math.round(w / (ratio || 16/9)), 340);
+  const b = { id: uid(), type:'video', x: pos.x, y: pos.y, w, h, src: dataUrl, radius:false, z: ++nextZ };
+  blocks.push(b); growIfNear(b.y + b.h);
+  emptyState.style.display = 'none';
+  renderBlock(b); selectBlock(b.id); scheduleSave();
+}
+function handleImageFile(file, x, y){
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => addImageBlock(reader.result, img.width / img.height, x, y);
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+function handleVideoFile(file, x, y){
+  if(file.size > LARGE_VIDEO_WARN_BYTES){
+    if(!confirm("This video is fairly large and may not save reliably in browser storage. Add it anyway?")) return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const probe = document.createElement('video');
+    probe.preload = 'metadata';
+    probe.onloadedmetadata = () => addVideoBlock(reader.result, probe.videoWidth / probe.videoHeight, x, y);
+    probe.onerror = () => addVideoBlock(reader.result, 16/9, x, y);
+    probe.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function slugFamily(id){ return 'cf-' + id; }
+async function handleFontFile(file){
+  const ext = file.name.split('.').pop().toLowerCase();
+  if(!VALID_FONT_EXT.includes(ext)){ alert('Please upload a .ttf, .otf, .woff, or .woff2 font file.'); return; }
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const dataUrl = reader.result;
+    const id = uid();
+    const family = slugFamily(id);
+    const ok = await registerFontFace(family, dataUrl);
+    if(!ok){ alert("That file couldn't be loaded as a font."); return; }
+    const label = file.name.replace(/\.[^/.]+$/, '');
+    fontsIndex.push({ id, label, family, format: ext });
+    try{ await window.storage.set('font-data:' + id, dataUrl, false); }
+    catch(e){ console.error('font data save failed', e); }
+    saveFontsIndex(); renderFontsList();
+  };
+  reader.readAsDataURL(file);
+}
+function renderFontsList(){
+  fontsList.innerHTML = '';
+  if(!fontsIndex.length){
+    const empty = document.createElement('div');
+    empty.className = 'drawer-empty';
+    empty.textContent = "No custom fonts yet — upload one to see it here.";
+    fontsList.appendChild(empty);
+    return;
+  }
+  fontsIndex.forEach(f => {
+    const row = document.createElement('div');
+    row.className = 'font-row';
+    const left = document.createElement('div');
+    left.innerHTML = `<div class="fname" style="font-family:'${f.family}',sans-serif">${f.label}</div><div class="fmeta">.${f.format}</div>`;
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = 'Remove';
+    removeBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      fontsIndex = fontsIndex.filter(x => x.id !== f.id);
+      saveFontsIndex();
+      try{ await window.storage.delete('font-data:' + f.id, false); }catch(err){}
+      renderFontsList();
+    });
+    row.appendChild(left); row.appendChild(removeBtn);
+    fontsList.appendChild(row);
+  });
+}
+
+function renderEntriesList(){
+  entriesList.innerHTML = '';
+  const sorted = [...journalDates].sort().reverse();
+  if(!sorted.length){
+    const empty = document.createElement('div');
+    empty.className = 'drawer-empty';
+    empty.textContent = 'No entries yet — write something and it will show up here.';
+    entriesList.appendChild(empty);
+    return;
+  }
+  sorted.forEach(dateStr => {
+    const { label, sub } = formatDate(dateStr);
+    const row = document.createElement('div');
+    row.className = 'entry-row';
+    row.innerHTML = `<div><div class="ename">${label === 'Today' ? 'Today — ' + sub : sub}</div>${dateStr === currentDate ? '<div class="emeta">currently open</div>' : ''}</div>`;
+    row.addEventListener('click', () => { closeEntriesDrawer(); goToDate(dateStr); });
+    entriesList.appendChild(row);
+  });
+}
+
+function applyBackground(){
+  if(background.mode === 'solid') canvas.style.background = background.solidColor;
+  else if(background.mode === 'gradient') canvas.style.background = `linear-gradient(${background.angle}deg, ${background.color1}, ${background.color2})`;
+  else canvas.style.background = '';
+}
+function setBgMode(mode){
+  background.mode = mode;
+  document.querySelectorAll('.bg-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === mode));
+  document.getElementById('bg-panel-default').classList.toggle('show', mode === 'default');
+  document.getElementById('bg-panel-solid').classList.toggle('show', mode === 'solid');
+  document.getElementById('bg-panel-gradient').classList.toggle('show', mode === 'gradient');
+  applyBackground(); scheduleSave();
+}
+function refreshBgInputs(){
+  document.querySelectorAll('.bg-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === background.mode));
+  document.getElementById('bg-panel-default').classList.toggle('show', background.mode === 'default');
+  document.getElementById('bg-panel-solid').classList.toggle('show', background.mode === 'solid');
+  document.getElementById('bg-panel-gradient').classList.toggle('show', background.mode === 'gradient');
+  document.getElementById('solid-hex').value = background.solidColor.toUpperCase();
+  document.getElementById('solid-picker').value = background.solidColor;
+  document.getElementById('grad-hex1').value = background.color1.toUpperCase();
+  document.getElementById('grad-picker1').value = background.color1;
+  document.getElementById('grad-hex2').value = background.color2.toUpperCase();
+  document.getElementById('grad-picker2').value = background.color2;
+  document.getElementById('grad-angle').value = background.angle;
+  document.getElementById('angle-value').textContent = background.angle + '°';
+}
+document.querySelectorAll('.bg-tab').forEach(tab => tab.addEventListener('click', () => setBgMode(tab.dataset.mode)));
+const solidHex = document.getElementById('solid-hex');
+const solidPicker = document.getElementById('solid-picker');
+solidHex.addEventListener('input', () => { if(HEX_RE.test(solidHex.value)){ background.solidColor = solidHex.value; solidPicker.value = solidHex.value; applyBackground(); scheduleSave(); } });
+solidPicker.addEventListener('input', () => { background.solidColor = solidPicker.value; solidHex.value = solidPicker.value.toUpperCase(); applyBackground(); scheduleSave(); });
+const gradHex1 = document.getElementById('grad-hex1'), gradPicker1 = document.getElementById('grad-picker1');
+const gradHex2 = document.getElementById('grad-hex2'), gradPicker2 = document.getElementById('grad-picker2');
+const gradAngle = document.getElementById('grad-angle'), angleValue = document.getElementById('angle-value');
+gradHex1.addEventListener('input', () => { if(HEX_RE.test(gradHex1.value)){ background.color1 = gradHex1.value; gradPicker1.value = gradHex1.value; applyBackground(); scheduleSave(); } });
+gradPicker1.addEventListener('input', () => { background.color1 = gradPicker1.value; gradHex1.value = gradPicker1.value.toUpperCase(); applyBackground(); scheduleSave(); });
+gradHex2.addEventListener('input', () => { if(HEX_RE.test(gradHex2.value)){ background.color2 = gradHex2.value; gradPicker2.value = gradHex2.value; applyBackground(); scheduleSave(); } });
+gradPicker2.addEventListener('input', () => { background.color2 = gradPicker2.value; gradHex2.value = gradPicker2.value.toUpperCase(); applyBackground(); scheduleSave(); });
+gradAngle.addEventListener('input', () => { background.angle = parseInt(gradAngle.value, 10); angleValue.textContent = background.angle + '°'; applyBackground(); scheduleSave(); });
+function buildPresetRows(){
+  const solidRow = document.getElementById('solid-presets');
+  solidRow.innerHTML = '';
+  SOLID_PRESETS.forEach(c => {
+    const sw = document.createElement('button'); sw.className = 'preset-swatch'; sw.style.background = c;
+    sw.addEventListener('click', () => { background.solidColor = c; solidHex.value = c.toUpperCase(); solidPicker.value = c; applyBackground(); scheduleSave(); });
+    solidRow.appendChild(sw);
+  });
+  const gradRow = document.getElementById('gradient-presets');
+  gradRow.innerHTML = '';
+  GRADIENT_PRESETS.forEach(([c1, c2]) => {
+    const sw = document.createElement('button'); sw.className = 'preset-swatch'; sw.style.background = `linear-gradient(135deg, ${c1}, ${c2})`;
+    sw.addEventListener('click', () => {
+      background.color1 = c1; background.color2 = c2;
+      gradHex1.value = c1.toUpperCase(); gradPicker1.value = c1;
+      gradHex2.value = c2.toUpperCase(); gradPicker2.value = c2;
+      applyBackground(); scheduleSave();
+    });
+    gradRow.appendChild(sw);
+  });
+}
+buildPresetRows();
+function openBgDrawer(){ refreshBgInputs(); bgDrawer.classList.add('show'); bgBackdrop.classList.add('show'); }
+function closeBgDrawer(){ bgDrawer.classList.remove('show'); bgBackdrop.classList.remove('show'); }
+document.getElementById('open-bg-btn').addEventListener('click', openBgDrawer);
+document.getElementById('close-bg-btn').addEventListener('click', closeBgDrawer);
+bgBackdrop.addEventListener('click', closeBgDrawer);
+
+async function exportPDF(){
+  if(!blocks.length){ alert('Nothing to export for this day yet — add some text or a photo first.'); return; }
+  deselect();
+  await new Promise(r => setTimeout(r, 60));
+  const pad = 28;
+  const minX = Math.max(0, Math.min(...blocks.map(b => b.x)) - pad);
+  const minY = Math.max(0, Math.min(...blocks.map(b => b.y)) - pad);
+  const maxX = Math.max(...blocks.map(b => b.x + b.w)) + pad;
+  const maxY = Math.max(...blocks.map(b => b.y + b.h)) + pad;
+  const width = Math.round(maxX - minX);
+  const height = Math.round(maxY - minY);
+  const downloadBtn = document.getElementById('download-pdf-btn');
+  const originalLabel = downloadBtn.textContent;
+  downloadBtn.textContent = 'Preparing…'; downloadBtn.disabled = true;
+  canvas.classList.add('exporting');
+  try{
+    const shot = await html2canvas(canvas, { x: minX, y: minY, width, height, backgroundColor: '#ffffff', scale: 2, useCORS: true });
+    const imgData = shot.toDataURL('image/jpeg', 0.92);
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: width > height ? 'landscape' : 'portrait', unit: 'px', format: [width, height] });
+    pdf.addImage(imgData, 'JPEG', 0, 0, width, height);
+    pdf.save(`journal-${currentDate}.pdf`);
+  }catch(e){
+    console.error('PDF export failed', e);
+    alert("Something went wrong creating the PDF. Please try again. (Note: video clips are skipped in the PDF — only text and images are captured.)");
+  }finally{
+    canvas.classList.remove('exporting'); downloadBtn.textContent = originalLabel; downloadBtn.disabled = false;
+  }
+}
+document.getElementById('download-pdf-btn').addEventListener('click', exportPDF);
+
+/* ---------- calendar ---------- */
+function minutesToTimeInput(m){ const h = Math.floor(m/60), mm = m%60; return String(h).padStart(2,'0') + ':' + String(mm).padStart(2,'0'); }
+function timeInputToMinutes(str){ const [h,m] = str.split(':').map(Number); return h*60 + m; }
+function formatTimeLabel(m){
+  let h = Math.floor(m/60); const mm = m%60; const ampm = h >= 12 ? 'PM' : 'AM';
+  let h12 = h % 12; if(h12 === 0) h12 = 12;
+  return `${h12}:${String(mm).padStart(2,'0')} ${ampm}`;
+}
+function formatHourLabel(hour){
+  const ampm = hour >= 12 ? 'PM' : 'AM'; let h12 = hour % 12; if(h12 === 0) h12 = 12;
+  return `${h12} ${ampm}`;
+}
+
+function applyCalTheme(){
+  const theme = CAL_THEMES.find(t => t.id === calThemeId) || CAL_THEMES[3];
+  calendarView.style.setProperty('--cal-bg', theme.bg);
+  calendarView.style.setProperty('--cal-text', theme.text);
+}
+
+function buildThemeGrid(){
+  const grid = document.getElementById('theme-grid');
+  grid.innerHTML = '';
+  CAL_THEMES.forEach(theme => {
+    const card = document.createElement('button');
+    card.className = 'theme-card' + (theme.id === calThemeId ? ' active' : '');
+    card.style.background = theme.bg;
+    card.style.color = theme.text;
+    card.innerHTML = `<div class="theme-sample">Aa</div><div class="theme-name">${theme.label}</div>`;
+    card.addEventListener('click', () => {
+      calThemeId = theme.id;
+      document.querySelectorAll('.theme-card').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+      applyCalTheme(); saveCalTheme();
+    });
+    grid.appendChild(card);
+  });
+}
+function openThemeDrawer(){ themeDrawer.classList.add('show'); themeBackdrop.classList.add('show'); }
+function closeThemeDrawer(){ themeDrawer.classList.remove('show'); themeBackdrop.classList.remove('show'); }
+document.getElementById('open-theme-btn').addEventListener('click', openThemeDrawer);
+document.getElementById('close-theme-btn').addEventListener('click', closeThemeDrawer);
+themeBackdrop.addEventListener('click', closeThemeDrawer);
+
+function renderCalendar(){
+  calLane.querySelectorAll('.cal-event, .cal-hour-label, .cal-now-line').forEach(el => el.remove());
+  for(let h = 0; h < 24; h++){
+    const label = document.createElement('div');
+    label.className = 'cal-hour-label';
+    label.style.top = (h * 60) + 'px';
+    label.textContent = formatHourLabel(h);
+    calLane.appendChild(label);
+  }
+  calEvents.forEach(renderEventChip);
+  renderNowLine();
+}
+
+function renderEventChip(ev){
+  const el = document.createElement('div');
+  el.className = 'cal-event' + (selectedEventId === ev.id ? ' selected' : '');
+  el.dataset.id = ev.id;
+  el.style.top = ev.start + 'px';
+  el.style.height = Math.max(15, ev.end - ev.start) + 'px';
+
+  const grip = document.createElement('div');
+  grip.className = 'grip'; grip.textContent = '⠿';
+  el.appendChild(grip);
+
+  const del = document.createElement('button');
+  del.className = 'del'; del.textContent = '×';
+  del.addEventListener('pointerdown', e => e.stopPropagation());
+  del.addEventListener('click', () => deleteEvent(ev.id));
+  el.appendChild(del);
+
+  const title = document.createElement('div');
+  title.className = 'cal-ev-title';
+  title.textContent = ev.title || 'New event';
+  el.appendChild(title);
+
+  if(ev.end - ev.start > 26){
+    const time = document.createElement('div');
+    time.className = 'cal-ev-time';
+    time.textContent = formatTimeLabel(ev.start) + ' – ' + formatTimeLabel(ev.end);
+    el.appendChild(time);
+  }
+
+  const resize = document.createElement('div');
+  resize.className = 'cal-resize';
+  el.appendChild(resize);
+
+  attachEventDrag(el, grip, ev);
+  attachEventResize(el, resize, ev);
+  el.addEventListener('pointerdown', e => e.stopPropagation());
+  el.addEventListener('click', e => { e.stopPropagation(); selectEvent(ev.id); });
+
+  calLane.appendChild(el);
+}
+
+function renderNowLine(){
+  if(currentDate !== todayString()) return;
+  const now = new Date();
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  const line = document.createElement('div');
+  line.className = 'cal-now-line';
+  line.style.top = minutes + 'px';
+  const dot = document.createElement('div');
+  dot.className = 'cal-now-dot';
+  line.appendChild(dot);
+  calLane.appendChild(line);
+}
+function startNowLine(){
+  stopNowLine();
+  nowLineInterval = setInterval(() => { if(activeTab === 'calendar') renderCalendar(); }, 60000);
+}
+function stopNowLine(){ if(nowLineInterval){ clearInterval(nowLineInterval); nowLineInterval = null; } }
+
+function createEventAt(startMinutes){
+  const start = Math.max(0, Math.min(1440 - 15, Math.round(startMinutes / 15) * 15));
+  const end = Math.min(1440, start + 60);
+  const ev = { id: uid(), title: '', start, end };
+  calEvents.push(ev);
+  renderEventChip(ev);
+  selectEvent(ev.id);
+  scheduleCalSave();
+}
+
+calLane.addEventListener('click', e => {
+  if(e.target !== calLane) return;
+  const rect = calLane.getBoundingClientRect();
+  const y = e.clientY - rect.top;
+  createEventAt(y);
+});
+
+function selectEvent(id){
+  selectedEventId = id;
+  calLane.querySelectorAll('.cal-event').forEach(el => el.classList.toggle('selected', el.dataset.id === id));
+  const ev = calEvents.find(x => x.id === id);
+  if(!ev) return;
+  calToolbar.classList.add('show');
+  calTitleInput.value = ev.title || '';
+  calStartInput.value = minutesToTimeInput(ev.start);
+  calEndInput.value = minutesToTimeInput(ev.end);
+}
+function deselectEvent(){
+  selectedEventId = null;
+  calLane.querySelectorAll('.cal-event').forEach(el => el.classList.remove('selected'));
+  calToolbar.classList.remove('show');
+}
+function currentEvent(){ return calEvents.find(x => x.id === selectedEventId); }
+
+calTitleInput.addEventListener('input', () => {
+  const ev = currentEvent(); if(!ev) return;
+  ev.title = calTitleInput.value;
+  const el = calLane.querySelector('[data-id="'+ev.id+'"] .cal-ev-title');
+  if(el) el.textContent = ev.title || 'New event';
+  scheduleCalSave();
+});
+calStartInput.addEventListener('change', () => {
+  const ev = currentEvent(); if(!ev) return;
+  let newStart = timeInputToMinutes(calStartInput.value);
+  newStart = Math.max(0, Math.min(ev.end - 15, newStart));
+  ev.start = newStart;
+  calStartInput.value = minutesToTimeInput(ev.start);
+  updateEventChipGeometry(ev);
+  scheduleCalSave();
+});
+calEndInput.addEventListener('change', () => {
+  const ev = currentEvent(); if(!ev) return;
+  let newEnd = timeInputToMinutes(calEndInput.value);
+  newEnd = Math.min(1440, Math.max(ev.start + 15, newEnd));
+  ev.end = newEnd;
+  calEndInput.value = minutesToTimeInput(ev.end);
+  updateEventChipGeometry(ev);
+  scheduleCalSave();
+});
+document.getElementById('cal-delete-btn').addEventListener('click', () => {
+  const ev = currentEvent(); if(!ev) return;
+  deleteEvent(ev.id);
+});
+
+function updateEventChipGeometry(ev){
+  const el = calLane.querySelector('[data-id="'+ev.id+'"]');
+  if(!el) return;
+  el.style.top = ev.start + 'px';
+  el.style.height = Math.max(15, ev.end - ev.start) + 'px';
+  const timeEl = el.querySelector('.cal-ev-time');
+  if(ev.end - ev.start > 26){
+    if(timeEl) timeEl.textContent = formatTimeLabel(ev.start) + ' – ' + formatTimeLabel(ev.end);
+    else {
+      const time = document.createElement('div');
+      time.className = 'cal-ev-time';
+      time.textContent = formatTimeLabel(ev.start) + ' – ' + formatTimeLabel(ev.end);
+      el.appendChild(time);
+    }
+  } else if(timeEl){ timeEl.remove(); }
+}
+
+function deleteEvent(id){
+  calEvents = calEvents.filter(e => e.id !== id);
+  const el = calLane.querySelector('[data-id="'+id+'"]');
+  if(el) el.remove();
+  if(selectedEventId === id) deselectEvent();
+  scheduleCalSave();
+}
+
+function attachEventDrag(el, handle, ev){
+  let dragging = false, startY, origStart;
+  handle.addEventListener('pointerdown', e => {
+    e.stopPropagation(); dragging = true; handle.setPointerCapture(e.pointerId);
+    startY = e.clientY; origStart = ev.start; selectEvent(ev.id);
+  });
+  handle.addEventListener('pointermove', e => {
+    if(!dragging) return;
+    const duration = ev.end - ev.start;
+    const deltaMin = Math.round((e.clientY - startY) / 15) * 15;
+    let newStart = Math.max(0, Math.min(1440 - duration, origStart + deltaMin));
+    ev.start = newStart; ev.end = newStart + duration;
+    el.style.top = ev.start + 'px';
+    calStartInput.value = minutesToTimeInput(ev.start);
+    calEndInput.value = minutesToTimeInput(ev.end);
+  });
+  const end = () => { if(dragging){ dragging = false; updateEventChipGeometry(ev); scheduleCalSave(); } };
+  handle.addEventListener('pointerup', end);
+  handle.addEventListener('pointercancel', end);
+}
+function attachEventResize(el, handle, ev){
+  let resizing = false, startY, origEnd;
+  handle.addEventListener('pointerdown', e => {
+    e.stopPropagation(); resizing = true; handle.setPointerCapture(e.pointerId);
+    startY = e.clientY; origEnd = ev.end; selectEvent(ev.id);
+  });
+  handle.addEventListener('pointermove', e => {
+    if(!resizing) return;
+    const deltaMin = Math.round((e.clientY - startY) / 15) * 15;
+    let newEnd = Math.max(ev.start + 15, Math.min(1440, origEnd + deltaMin));
+    ev.end = newEnd;
+    el.style.height = Math.max(15, ev.end - ev.start) + 'px';
+    calEndInput.value = minutesToTimeInput(ev.end);
+  });
+  const end = () => { if(resizing){ resizing = false; updateEventChipGeometry(ev); scheduleCalSave(); } };
+  handle.addEventListener('pointerup', end);
+  handle.addEventListener('pointercancel', end);
+}
+
+document.getElementById('cal-clear-btn').addEventListener('click', () => {
+  if(!calEvents.length){ return; }
+  if(confirm(`Clear the whole schedule for ${formatDate(currentDate).sub}? This can't be undone.`)){
+    calEvents = []; deselectEvent(); renderCalendar(); scheduleCalSave();
+  }
+});
+
+/* ---------- notes (Keep-style) ---------- */
+function renderNotes(){
+  notesGrid.innerHTML = '';
+  if(!notes.length){
+    const empty = document.createElement('div');
+    empty.id = 'notes-empty';
+    empty.textContent = 'No notes yet — tap + to jot something down.';
+    notesGrid.appendChild(empty);
+    return;
+  }
+  notes.forEach(note => {
+    const card = document.createElement('div');
+    card.className = 'note-card';
+    card.style.background = note.color;
+    card.dataset.id = note.id;
+
+    const text = document.createElement('div');
+    text.className = 'note-text';
+    text.contentEditable = 'true';
+    text.innerText = note.text || '';
+    text.addEventListener('input', () => { note.text = text.innerText; scheduleNotesSave(); });
+    card.appendChild(text);
+
+    const footer = document.createElement('div');
+    footer.className = 'note-footer';
+
+    const colorsWrap = document.createElement('div');
+    colorsWrap.className = 'note-colors';
+    NOTE_COLORS.forEach(c => {
+      const dot = document.createElement('button');
+      dot.className = 'note-dot' + (note.color === c ? ' active' : '');
+      dot.style.background = c;
+      dot.addEventListener('click', (e) => {
+        e.preventDefault();
+        note.color = c; card.style.background = c;
+        colorsWrap.querySelectorAll('.note-dot').forEach(d => d.classList.remove('active'));
+        dot.classList.add('active');
+        scheduleNotesSave();
+      });
+      colorsWrap.appendChild(dot);
+    });
+    footer.appendChild(colorsWrap);
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'note-del';
+    delBtn.textContent = 'Delete';
+    delBtn.addEventListener('click', () => {
+      notes = notes.filter(n => n.id !== note.id);
+      renderNotes();
+      scheduleNotesSave();
+    });
+    footer.appendChild(delBtn);
+
+    card.appendChild(footer);
+    notesGrid.appendChild(card);
+  });
+}
+function addNote(){
+  const note = { id: uid(), text: '', color: '#fdf3c7', updatedAt: Date.now() };
+  notes.unshift(note);
+  renderNotes();
+  scheduleNotesSave();
+  const el = notesGrid.querySelector('[data-id="'+note.id+'"] .note-text');
+  if(el){ el.focus(); el.scrollIntoView({ behavior:'smooth', block:'center' }); }
+}
+
+/* ---------- fab & drawers ---------- */
+fab.addEventListener('click', () => {
+  if(activeTab === 'notes'){ addNote(); return; }
+  if(activeTab === 'calendar'){ return; }
+  fab.classList.toggle('open'); fabOptions.classList.toggle('show');
+});
+fabOptions.addEventListener('click', e => {
+  const action = e.target.closest('.fab-option')?.dataset.action;
+  if(!action) return;
+  fab.classList.remove('open'); fabOptions.classList.remove('show');
+  if(action === 'text') addTextBlock();
+  if(action === 'photo') fileInputImage.click();
+  if(action === 'video') fileInputVideo.click();
+});
+fileInputImage.addEventListener('change', () => { const file = fileInputImage.files[0]; if(file) handleImageFile(file); fileInputImage.value = ''; });
+fileInputVideo.addEventListener('change', () => { const file = fileInputVideo.files[0]; if(file) handleVideoFile(file); fileInputVideo.value = ''; });
+
+function closeFontsDrawer(){ fontsDrawer.classList.remove('show'); fontsBackdrop.classList.remove('show'); }
+document.getElementById('open-fonts-btn').addEventListener('click', () => { fontsDrawer.classList.add('show'); fontsBackdrop.classList.add('show'); });
+document.getElementById('close-fonts-btn').addEventListener('click', closeFontsDrawer);
+fontsBackdrop.addEventListener('click', closeFontsDrawer);
+document.getElementById('upload-font-btn').addEventListener('click', () => fileInputFont.click());
+fileInputFont.addEventListener('change', () => { const file = fileInputFont.files[0]; if(file) handleFontFile(file); fileInputFont.value = ''; });
+
+function closeEntriesDrawer(){ entriesDrawer.classList.remove('show'); entriesBackdrop.classList.remove('show'); }
+document.getElementById('open-entries-btn').addEventListener('click', () => { renderEntriesList(); entriesDrawer.classList.add('show'); entriesBackdrop.classList.add('show'); });
+document.getElementById('close-entries-btn').addEventListener('click', closeEntriesDrawer);
+entriesBackdrop.addEventListener('click', closeEntriesDrawer);
+
+document.getElementById('clear-day-btn').addEventListener('click', () => {
+  if(confirm(`Clear everything written on ${formatDate(currentDate).sub}? This can't be undone.`)){
+    blocks = []; deselect(); renderAll(); scheduleSave();
+  }
+});
+
+board.addEventListener('pointerdown', e => {
+  if(e.target === board || e.target === canvas || e.target === emptyState){
+    deselect(); fab.classList.remove('open'); fabOptions.classList.remove('show');
+  }
+});
+
+/* ---------- drag & drop onto journal canvas (images, videos, fonts) ---------- */
+canvas.addEventListener('dragover', e => { e.preventDefault(); canvas.classList.add('drag-over'); });
+canvas.addEventListener('dragleave', () => canvas.classList.remove('drag-over'));
+canvas.addEventListener('drop', e => {
+  e.preventDefault();
+  canvas.classList.remove('drag-over');
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const files = Array.from(e.dataTransfer.files || []);
+  files.forEach(file => {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if(file.type.startsWith('image/')) handleImageFile(file, x, y);
+    else if(file.type.startsWith('video/')) handleVideoFile(file, x, y);
+    else if(VALID_FONT_EXT.includes(ext)) handleFontFile(file);
+  });
+});
+
+init();
+</script>
+</body>
+</html>
